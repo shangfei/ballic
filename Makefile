@@ -1,7 +1,10 @@
-
-objects = ballic.o ballic.single.o ballic.multi.o modelsolve.o
+# Files needed to compile the single component version of ballic
+single_objects = ballic.single.o model.single.o grid.o
+# Tipsy API
 tipsy_objects = tipsy.o 
+# Tillotson library
 till_objects = tillotson/tillotson.o tillotson/tillinitlookup.o tillotson/tillsplint.o tillotson/interpol/coeff.o tillotson/interpol/interpol.o tillotson/interpol/brent.o tillotson/nr/nrcubicspline.o tillotson/nr/nrutil.o
+# Icosahedron
 fortran_objects = icosahedron.o
 FC := gfortran
 
@@ -9,6 +12,8 @@ exe = ballic ballic.single ballic.multi modelsolve
 
 CFLAGS ?= -O3 -march=native
 FFLAGS ?= $(CFLAGS)
+
+objects = $(single_objects)
 
 default:
 	@echo "Please specify, which tool to make (e.g., ballic, single, multi)."
@@ -23,8 +28,8 @@ ballic: ballic.o $(tipsy_objects) $(fortran_objects)
 
 # Single component version of ballic. It first calculates an equilibrium model for a given material and then
 # generates a particle representation.
-single: ballic.single.o $(tipsy_objects) $(till_objects) $(fortran_objects)
-	cc -o ballic.single ballic.single.o $(tipsy_objects) $(till_objects) $(fortran_objects) -lm
+single: $(single_objects) $(tipsy_objects) $(till_objects) $(fortran_objects)
+	cc -o ballic.single $(single_objects) $(tipsy_objects) $(till_objects) $(fortran_objects) -lm
 
 # Two component version of ballic. It first calculates an equilibrium model for a given material and then
 # generates a particle representation.
@@ -39,7 +44,7 @@ multi.atm: ballic.multi.atm.o $(tipsy_objects) $(till_objects) $(fortran_objects
 modelsolve: modelsolve.o $(till_objects)
 	cc -o modelsolve modelsolve.o $(till_objects) -lm
 clean:
-	rm -f $(exe) $(objects) 
+	rm -f $(exe) $(objects)
 
 cleanall:
 	rm -f $(exe) $(objects) $(tipsy_objects) $(till_objects) $(fortran_objects)
