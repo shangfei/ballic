@@ -15,145 +15,54 @@
 #include "model.single.h"
 #include "ballic.single.h"
 
-double MLookup(MODEL *model,double r) {
-    double x,xi,dr;
-    int i;
-
-    i = model->nTable-1;
-    if (r >= model->r[i]) return(model->M[i]*(1.0 + log(r-model->r[i]+1)));
-    x = r/model->dr;
-    xi = floor(x);
-    assert(xi >= 0.0);
-    x -= xi;
-    i = (int)xi;
-    if (i < 0) {
-	fprintf(stderr,"ERROR r:%.14g x:%.14g xi:%.14g i:%d\n",r,x,xi,i);
-	}
-    assert(i >= 0);
-    if (i < model->nTable-2) {
-	return(model->M[i]*(1.0-x) + model->M[i+1]*x);
-	}
-    if (i == model->nTable-2) {
-	dr = model->r[i+1] - model->r[i];
-	x = r/dr;
-	xi = floor(x);
-	x -= xi;
-	return(model->M[i]*(1.0-x) + model->M[i+1]*x);
-	}
-    else {
-	i = model->nTable - 1;
-	return(model->M[i]*(1.0 + log(r-model->r[i]+1)));
-	}
-    }
-
-double rhoLookup(MODEL *model,double r) {
-    double x,xi,dr;
-    int i;
-
-    i = model->nTable-1;
-    if (r >= model->r[i]) return(model->rho[i]*exp(-(r-model->r[i])));
-    x = r/model->dr;
-    xi = floor(x);
-    assert(xi >= 0.0);
-    x -= xi;
-    i = (int)xi;
-    if (i < 0) {
-	fprintf(stderr,"ERROR r:%.14g x:%.14g xi:%.14g i:%d\n",r,x,xi,i);
-	}
-    assert(i >= 0);
-    if (i < model->nTable-2) {
-	return(model->rho[i]*(1.0-x) + model->rho[i+1]*x);
-	}
-    if (i == model->nTable-2) {
-	dr = model->r[i+1] - model->r[i];
-	x = r/dr;
-	xi = floor(x);
-	x -= xi;
-	return(model->rho[i]*(1.0-x) + model->rho[i+1]*x);
-	}
-    else {
-	i = model->nTable - 1;
-	return(model->rho[i]*exp(-(r-model->r[i])));
-	}
-    }
-
-double uLookup(MODEL *model,double r) {
-    double x,xi,dr;
-    int i;
-
-    i = model->nTable-1;
-    if (r >= model->r[i]) return(model->u[i]*exp(-(r-model->r[i])));
-    x = r/model->dr;
-    xi = floor(x);
-    assert(xi >= 0.0);
-    x -= xi;
-    i = (int)xi;
-    if (i < 0) {
-	fprintf(stderr,"ERROR r:%.14g x:%.14g xi:%.14g i:%d\n",r,x,xi,i);
-	}
-    assert(i >= 0);
-    if (i < model->nTable-2) {
-	return(model->u[i]*(1.0-x) + model->u[i+1]*x);
-	}
-    if (i == model->nTable-2) {
-	dr = model->r[i+1] - model->r[i];
-	x = r/dr;
-	xi = floor(x);
-	x -= xi;
-	return(model->u[i]*(1.0-x) + model->u[i+1]*x);
-	}
-    else {
-	i = model->nTable - 1;
-	return(model->u[i]*exp(-(r-model->r[i])));
-	}
-    }
-
 double Fzero(MODEL *model,int bIcosa,double r,double ri,double m,int ns) {
-    long npix = (bIcosa)?(40*ns*(ns-1)+12):(12*ns*ns);
-    return(MLookup(model,r)-MLookup(model,ri)-npix*m);
-    }
-
+	long npix = (bIcosa)?(40*ns*(ns-1)+12):(12*ns*ns);
+	return(MLookup(model,r)-MLookup(model,ri)-npix*m);
+}
 
 double rShell(MODEL *model,double m,double ri) {
-    double a = ri;
-    double b = 1.0;
-    double c,Mc,Ma;
+	double a = ri;
+	double b = 1.0;
+	double c,Mc,Ma;
 
-    Ma = MLookup(model,a);
-    Mc = 0.0;
-    while (m > (MLookup(model,b)-Ma)) b *= 2.0;
-    while (fabs(m-(Mc-Ma)) > 1e-10*m) {
-	c = 0.5*(a + b);
-	Mc = MLookup(model,c);
-//	fprintf(stderr,"c:%.7g Mc:%.7g\n",c,Mc);
-	if (m > (Mc-Ma)) a = c;
-	else b = c;
+	Ma = MLookup(model,a);
+	Mc = 0.0;
+	while (m > (MLookup(model,b)-Ma)) b *= 2.0;
+	while (fabs(m-(Mc-Ma)) > 1e-10*m) {
+		c = 0.5*(a + b);
+		Mc = MLookup(model,c);
+//		fprintf(stderr,"c:%.7g Mc:%.7g\n",c,Mc);
+		if (m > (Mc-Ma)) a = c;
+		else b = c;
 	}
     return c;
-    }
-
+}
 
 double rShell2(MODEL *model,int bIcosa,double m,double ri,int ns) {
-    double a = ri;
-    double b = 1.0;
-    double c;
-    double z;
+	double a = ri;
+	double b = 1.0;
+	double c;
+	double z;
 
-    z = 1.0;
-    while (Fzero(model,bIcosa,b,ri,m,ns) < 0) b *= 2.0;
-    while ((b-a)/c > 1e-10) {
-	c = 0.5*(a + b);
-	z = Fzero(model,bIcosa,c,ri,m,ns);
-	if (z < 0) a = c;
-	else b = c;
-//	printf("c:%.14g M(c):%.14g\n",c,MLookup(model,c));
+	z = 1.0;
+	while (Fzero(model,bIcosa,b,ri,m,ns) < 0) b *= 2.0;
+
+	while ((b-a)/c > 1e-10) {
+		c = 0.5*(a + b);
+		z = Fzero(model,bIcosa,c,ri,m,ns);
+		if (z < 0) a = c;
+		else b = c;
+//		printf("c:%.14g M(c):%.14g\n",c,MLookup(model,c));
 	}
-    return c;
-    }
+	return c;
+}
 
 
 void main(int argc, char **argv) {
-    const int bCentral = 1;
+	/*
+	** Do we want a central particle: yes (1) or no (0).
+	*/
+    const int bCentral = 0;
     int bIcosa = 0;
     const int bRandomRotate = 1;
     TCTX out;

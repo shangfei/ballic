@@ -277,3 +277,112 @@ double modelSolve(MODEL *model,double M) {
     model->R = R;
     return c;
     }
+
+/*
+ * The lookup functions are used to determine the enclosed mass, density
+ * and internal energy of a shell. They assume, that the arrays are ordered
+ * in r.
+ */
+double MLookup(MODEL *model,double r) {
+    double x,xi,dr;
+    int i;
+
+	i = model->nTable-1;
+	if (r >= model->r[i]) return(model->M[i]*(1.0 + log(r-model->r[i]+1)));
+	x = r/model->dr;
+	xi = floor(x);
+	assert(xi >= 0.0);
+	x -= xi;
+	i = (int)xi;
+    
+	if (i < 0) {
+		fprintf(stderr,"ERROR r:%.14g x:%.14g xi:%.14g i:%d\n",r,x,xi,i);
+	}
+    assert(i >= 0);
+    
+	if (i < model->nTable-2) {
+		return(model->M[i]*(1.0-x) + model->M[i+1]*x);
+	}
+
+    if (i == model->nTable-2) {
+		dr = model->r[i+1] - model->r[i];
+		x = r/dr;
+		xi = floor(x);
+		x -= xi;
+		return(model->M[i]*(1.0-x) + model->M[i+1]*x);
+	} else {
+		i = model->nTable - 1;
+		return(model->M[i]*(1.0 + log(r-model->r[i]+1)));
+	}
+}
+
+/*
+ * Lookup rho(r) from the model.
+ */
+double rhoLookup(MODEL *model,double r) {
+	double x,xi,dr;
+	int i;
+
+	i = model->nTable-1;
+	if (r >= model->r[i]) return(model->rho[i]*exp(-(r-model->r[i])));
+	x = r/model->dr;
+	xi = floor(x);
+	assert(xi >= 0.0);
+	x -= xi;
+	i = (int)xi;
+	if (i < 0) {
+		fprintf(stderr,"ERROR r:%.14g x:%.14g xi:%.14g i:%d\n",r,x,xi,i);
+	}
+    assert(i >= 0);
+    
+	if (i < model->nTable-2) {
+		return(model->rho[i]*(1.0-x) + model->rho[i+1]*x);
+	}
+
+    if (i == model->nTable-2) {
+		dr = model->r[i+1] - model->r[i];
+		x = r/dr;
+		xi = floor(x);
+		x -= xi;
+		return(model->rho[i]*(1.0-x) + model->rho[i+1]*x);
+	} else {
+		i = model->nTable - 1;
+		return(model->rho[i]*exp(-(r-model->r[i])));
+	}
+}
+
+/*
+ * Lookup u(r) from the model.
+ */
+double uLookup(MODEL *model,double r) {
+	double x,xi,dr;
+	int i;
+
+	i = model->nTable-1;
+	if (r >= model->r[i]) return(model->u[i]*exp(-(r-model->r[i])));
+	x = r/model->dr;
+	xi = floor(x);
+	assert(xi >= 0.0);
+	x -= xi;
+	i = (int)xi;
+	if (i < 0) {
+		fprintf(stderr,"ERROR r:%.14g x:%.14g xi:%.14g i:%d\n",r,x,xi,i);
+	}
+	assert(i >= 0);
+    
+	if (i < model->nTable-2) {
+		return(model->u[i]*(1.0-x) + model->u[i+1]*x);
+	}
+
+    if (i == model->nTable-2) {
+		dr = model->r[i+1] - model->r[i];
+		x = r/dr;
+		xi = floor(x);
+		x -= xi;
+		return(model->u[i]*(1.0-x) + model->u[i+1]*x);
+	} else {
+		i = model->nTable - 1;
+		return(model->u[i]*exp(-(r-model->r[i])));
+	}
+}
+
