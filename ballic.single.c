@@ -62,7 +62,7 @@ void main(int argc, char **argv) {
 	/*
 	** Do we want a central particle: yes (1) or no (0).
 	*/
-    const int bCentral = 0;
+    const int bCentral = 1;
     int bIcosa = 0;
     const int bRandomRotate = 1;
     TCTX out;
@@ -244,10 +244,10 @@ void main(int argc, char **argv) {
 	    fprintf(stderr,"iShell:%d ns:%d radial/tangential:??? (added)\n",nShell,ns);
 	    nShell++;
 	    }
-	fprintf(stderr,"nReached:%d old mass:%.7g new mass:%.7g\n",
+		fprintf(stderr,"nReached:%d old mass:%.7g new mass:%.7g\n",
 	    nReached,m,mTot/nReached);
-	m = mTot/nReached;
-	nDesired = nReached+1;
+		m = mTot/nReached;
+		nDesired = nReached+1;
 	}
     /*
     ** Phase 2: With the numbers of particles in each of the shells now fixed
@@ -345,6 +345,13 @@ void main(int argc, char **argv) {
 	*/
 	fprintf(stderr,"l1max: %g l2max: %g epsilon: %g\n",l1max,l2max,MAX(l1max,l2max));
     gp.hsmooth = MAX(l1max,l2max);  /* is actually eps for gasoline */
+
+	/*
+	** If we have a central particle, the particle mass has to be adjusted.
+	*/
+	if (bCentral) {
+		m = mTot/(nReached+1);
+	}
     gp.mass = m;
 
 	fprintf(stderr,"hsmooth=%g\n",gp.hsmooth);
