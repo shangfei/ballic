@@ -460,6 +460,9 @@ double rShell2(MODEL *model,int bIcosa,double m,double ri,int ns) {
 void main(int argc, char **argv) {
     const int bCentral = 1;
     int bIcosa = 0;
+    /*
+    ** Rotate each shell.
+    */
     const int bRandomRotate = 1;
     TCTX out;
     long ns,npix,ipix,na,nb;
