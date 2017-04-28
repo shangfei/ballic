@@ -1,16 +1,32 @@
+#
 # Files needed to compile the single component version of ballic
+#
 single_objects = ballic.single.o model.single.o grid.o
+
+#
 # Tipsy API
+#
 tipsy_objects = tipsy.o 
+
+#
 # Tillotson library
+#
 till_objects = tillotson/tillotson.o tillotson/tillinitlookup.o tillotson/tillsplint.o tillotson/interpol/coeff.o tillotson/interpol/interpol.o tillotson/interpol/brent.o tillotson/nr/nrcubicspline.o tillotson/nr/nrutil.o
+
+#
 # Icosahedron
+#
 fortran_objects = icosahedron.o
 FC := gfortran
 
 exe = ballic ballic.single ballic.multi modelsolve
 
-CFLAGS ?= -O3 -march=native
+#
+# Code defines
+#
+#defs = -DTILL_PRESS_NP -DTILL_OUTPUT_ALL_WARNINGS -DTILL_PRESS_MELOSH
+
+CFLAGS ?= -O3 -march=native 
 FFLAGS ?= $(CFLAGS)
 
 objects = $(single_objects)
