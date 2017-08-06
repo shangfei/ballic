@@ -2,7 +2,11 @@
  * Copyright (c) 2016 Christian Reinhardt.
  *
  * This program solves the structure equations to obtain an equilibrium model
- * for different values rhos=rho(r=R) and us=u(r=R).
+ * for given mass M, surface density rho0 and internal energy us using the
+ * matching point method.
+ *
+ * The free variable is the enclosed mass m = m(r), so the boundary conditions
+ * are r(m=M)=0 at the core and rho(m=M)=rho0, u(m=M)=us at the surface.
  */
 #include <math.h>
 #include <stdio.h>
@@ -58,9 +62,9 @@ MODEL *modelInit(int iMat)
     assert(model->rho != NULL);
     model->u = (double *) malloc(model->nTableMax*sizeof(double));
     assert(model->u != NULL);
-    model->z = (double *) malloc(model->nTableMax*sizeof(double));
-    assert(model->z != NULL);
-    model->dz =  0.0;
+    model->r = (double *) malloc(model->nTableMax*sizeof(double));
+    assert(model->r != NULL);
+    model->dr =  0.0;
     model->nTable = 0;
     
     return(model);
@@ -81,24 +85,22 @@ double dudrho(MODEL *model, double rho, double u)
 /*
  * We have
  *
- * du/dr = du/drho*drho/dr
+ * du/dm = du/drho*drho/dm
  *
  * since u = u(rho) for constant entropy.
  */
-double dudz(MODEL *model, double z, double rho, double M, double u, double R)
+double dudm(MODEL *model, double M, double r, double rho, double u)
 {
-	return(dudrho(model, rho, u)*drhodz(model, z, rho, M, u, R));
+	return(dudrho(model, rho, u)*drhodm(model, M, r, rho, u));
 }
 
 /*
- * The derivative  of the density with respect to r is obtained
- * from the equation for hydrostatic equilibrium. Note that
- * M(z) is the enclosed mass at r = R - z.
+ * The derivative  of the density with respect to m is obtained
+ * from the equation for hydrostatic equilibrium.
  */
-double drhodz(MODEL *model, double z, double rho, double M, double u, double R)
+double drhodm(MODEL *model, double M, double r, double rho, double u)
 {
 	double dPdrho, dPdu;
-	double r = R-z;
 	/*
 	 * Derivatives of P with respect to rho and u.
 	 */
@@ -106,15 +108,16 @@ double drhodz(MODEL *model, double z, double rho, double M, double u, double R)
 	dPdu = tilldPdu(model->tillMat, rho, u); // dP/du at rho=const.
 
 	/*
-	 * drho/dz = G*M(z)*rho(z)/((R-Z)^2*(dPdrho+dPdu*dudrho)
+	 * drho/dm = -G*M/(r^4*(dPdrho+dPdu*dudrho)
 	 */
-	assert(r>= 0.0);
-	if (r > 0.0)
+	assert(M>= 0.0);
+
+	if (M > 0.0)
 	{
 		// We assume G=1
-		return(M*rho/(r*r*(dPdrho + dPdu*dudrho(model,rho,u))));
-	} else {
-		// Avoid problems for r=0.
+		return(-M/(r*r*r*r*(dPdrho + dPdu*dudrho(model,rho,u))));
+    } else {
+		// Avoid problems for m=0.
 		return(0.0);
 	}
 }
@@ -122,97 +125,113 @@ double drhodz(MODEL *model, double z, double rho, double M, double u, double R)
 /*
  * This derivative is independent of the model and only involves geometry.
  */
-double dMdz(double z, double rho, double R)
+double drdm(double r, double rho)
 {
-    double r = R - z;
 	assert(r >= 0.0);
-	return(4.0*M_PI*r*r*rho);
+	return(1.0/(4.0*M_PI*r*r*rho));
 }
 
 /*
- * This function solves the equations from hydrostatic equlibrium from
- * the surface to the core with b.c.
+ * This function solves the equations of hydrostatic equlibrium from the
+ * surface to the matching point using M as a free variable with b.c.
  *
- * rho(z=0)=rho0, M(z=0)=M and u(z=0)=us where r=R-z
+ * rho(m=M)=rho0 and u(m=M)=us
  *
- * and returns the enclosed mass when z == *pR.  If an error occurs
- * the function returns M < 0.
+ * where r(m=M)=R is undetermined and given as a parameter. It returns an error
+ * code (0: ok (TRUE), 1: fail (FALSE)) and the values
+ *
+ * r(m=M_mid)=r_L, rho(m=M_mid) = rho_L and u(m=M_mid) = u_L
+ *
+ * at the midpoint M_mid in *pR, *pRho and *pU. The parameter h determines
+ * the step size used in the integration.
  */
-double midPtRKIn(MODEL *model, double rho, double M, double u, double R, double h, double *pR)
+int midPtRKIn(MODEL *model, double Mtot, double R, double rho0, double us, double h, double M_mid, double *pR, double *pRho, double *pU)
 {
-    FILE *fp;
-    double z = 0.0;
-    double k1rho,k1M,k1u,k2rho,k2M,k2u,x;
-    int i;
-
-    R = *pR;
+    double M = Mtot;
+    double r = R;
+    double rho = rho0;
+    double u = us;
+    double k1r, k1rho, k1u, k2r, k2rho, k2u, x;
 	/*
 	 * Check, if the initial values are sensible.
 	 */
     assert(M > 0.0);
+    assert(M_mid >= 0.0);
     assert(u > 0.0);
-    assert(R > 0.0);
+    assert(r > 0.0);
+    assert(h > 0.0);
 
-    while (z < R)
+    while (M > M_mid)
 	{
 		/*
 		* Midpoint Runga-Kutta (2nd order).
 		*/
-		k1rho = h*drhodz(model, z, rho, M, u, R);
-		k1M = h*dMdz(z, rho, R);
-		k1u = h*dudz(model, z, rho, M, u);
+		k1r = h*drdm(r, rho);
+        k1rho = h*drhodm(model, M, r, rho, u);
+		k1u = h*dudm(model, M, r, rho, u);
 
-		k2rho = h*drhodz(model, z+0.5*h, rho+0.5*k1rho, M+0.5*k1M, u+0.5*k1u, R);
-		k2M = h*dMdz(z+0.5*h, rho+0.5*k1rho, R);
-		k2u = h*dudz(model, z+0.5*h, rho+0.5*k1rho, M+0.5*k1M, u+0.5*k1u);
+		k2r = h*drdm(r-0.5*k1r, rho-0.5*k1rho);
+		k2rho = h*drhodm(model, M-0.5*h, r-0.5*k1r, rho-0.5*k1rho, u-0.5*k1u);
+		k2u = h*dudm(model, M-0.5*h, r-0.5*k1r, rho-0.5*k1rho, u-0.5*k1u);
 
-		rho += k2rho;
-		M += k2M;
-		u += k2u;
-		z += h;
+		r -= k2r;
+		rho -= k2rho;
+		u -= k2u;
+		M -= h;
 
-		if (u < 0.0)
-		{
-			M = -1.0;
-			return(M);
-		}
+        printf("%15.7E %15.7E %15.7E %15.7E\n", r, rho, M, u);
 	}
 
     /*
-	 * Now do a linear interpolation to rho == rho0.
+	 * Now do a linear interpolation to M == M_mid0.
+     *
+     * y = A*y_n-1 + B*yn where A=(M_n-M_mid)/(M_n-M_n-1) and B=1-A
+     *
+     * so we get
+     *
+     * y = yn - x*k2y where k2y = y_n-y_n-1
 	 */
-	x = (model->tillMat->rho0 - rho)/k2rho;
-	//	assert(x <= 0.0);
-	if (x > 0.0)
-	{
-		M = -1.0;
-		return(M);
-	}
+    x = (M-M_mid)/h;
+    assert(x <= 0.0);
 
-	r += h*x;
-	M += k2M*x;
-	rho += k2rho*x;
-	u += k2u*x;
+	M -= h*x;
+	r -= k2r*x;
+	rho -= k2rho*x;
+	u -= k2u*x;
 
-    *pR = z;
-    return(M);
+    printf("%15.7E %15.7E %15.7E %15.7E\n", r, rho, M, u);
+    printf("\n");
+
+    // Return R, rho and u
+    *pR = r;
+    *pRho=rho;
+    *pU=u;
+
+    return(0);
 }
+
 /*
- * This function solves the model as an initial value problem with
+ * This function solves the equations of hydrostatic equlibrium from the core 
+ * to the matching point using M as a free variable with b.c.
  *
- * rho_initial=rho, M_initial=0 and u_initial=u at r=0
+ * r(m=0)=0
  *
- * and returns the mass when rho == model->tillMat[i]->rho0. The
- * final radius of the model is returned in *pR. For bSetModel=1
- * the results are stored in the look up table. If an error occurs
- * the function returns M < 0.
+ * where rho(m=0)=rhoc and u(m=0)=uc are undetermined and given as a parameter.
+ * It returns an error code (0: ok (TRUE), 1: fail (FALSE)) and the values
+ * 
+ * r(m=M_mid)=r_L, rho(m=M_mid) = rho_L and u(m=M_mid) = u_L
+ *
+ * at the midpoint M_mid in *pR, *pRho and *pU. The parameter h determines the
+ * step size used in the integration.
  */
-double midPtRK(MODEL *model,int bSetModel,double rho,double u,double h,double *pR)
+int midPtRKOut(MODEL *model, int bSetModel, double rhoc, double uc, double h, double M_mid, double *pR, double *pRho, double *pU)
 {
     FILE *fp;
     double M = 0.0;
     double r = 0.0;
-    double k1rho,k1M,k1u,k2rho,k2M,k2u,x;
+    double rho = rhoc;
+    double u = uc;
+    double k1r, k1rho, k1u, k2r, k2rho, k2u,x;
     int i;
 
 	/*
@@ -234,59 +253,49 @@ double midPtRK(MODEL *model,int bSetModel,double rho,double u,double h,double *p
 		model->r[i] = r;
 		fp = fopen("ballic.model","w");
 		assert(fp != NULL);
-		fprintf(fp,"%g %g %g %g\n",r,rho,M,u);
+		fprintf(fp,"%15.7E %15.7E %15.7E %15.7E\n", r, rho, M, u);
 		++i;
 	}
 
-    while (rho > model->tillMat->rho0)
+    while (M <= M_mid)
 	{
 		/*
-		* Midpoint Runga-Kutta (2nd order).
-		*/
-		k1rho = h*drhodr(model,r,rho,M,u);
-		k1M = h*dMdr(r,rho);
-		k1u = h*dudr(model,r,rho,M,u);
+         * Midpoint Runga-Kutta (2nd order).
+		 */
+		k1r = h*drdm(r, rho);
+        k1rho = h*drhodm(model, M, r, rho, u);
+		k1u = h*dudm(model, M, r, rho, u);
 
-		k2rho = h*drhodr(model,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
-		k2M = h*dMdr(r+0.5*h,rho+0.5*k1rho);
-		k2u = h*dudr(model,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
+		k2r = h*drdm(r+0.5*k1r, rho+0.5*k1rho);
+		k2rho = h*drhodm(model, M+0.5*h, r+0.5*k1r, rho+0.5*k1rho, u+0.5*k1u);
+		k2u = h*dudm(model, M+0.5*h, r+0.5*k1r, rho+0.5*k1rho, u+0.5*k1u);
 
+		r += k2r;
 		rho += k2rho;
-		M += k2M;
 		u += k2u;
-		r += h;
+		M += h;
 
-		if (u < 0.0)
-		{
-			M = -1.0;
-			return(M);
-		}
-
-//		printf("%g %g %g %g\n",r,rho,M,u);
 		if (bSetModel)
 		{
-	    	model->rho[i] = rho;
-			model->M[i] = M;
-			model->u[i] = u;
+            model->M[i] = M;
 			model->r[i] = r;
-			fprintf(fp,"%g %g %g %g\n",r,rho,M,u);
+            model->rho[i] = rho;
+			model->u[i] = u;
+
+		    fprintf(fp,"%15.7E %15.7E %15.7E %15.7E\n", r, rho, M, u);
 			++i;
 	    }
 	}
 
     /*
-	 * Now do a linear interpolation to rho == rho0.
+	 * Now do a linear interpolation to M == M_mid as described in
+     * midPtRKOut().
 	 */
-	x = (model->tillMat->rho0 - rho)/k2rho;
-	//	assert(x <= 0.0);
-	if (x > 0.0)
-	{
-		M = -1.0;
-		return(M);
-	}
+    x = (M-M_mid)/h;
+    assert(x <= 0.0);
 
-	r += h*x;
-	M += k2M*x;
+	M += h*x;
+	r += k2r*x;
 	rho += k2rho*x;
 	u += k2u*x;
 
@@ -298,7 +307,7 @@ double midPtRK(MODEL *model,int bSetModel,double rho,double u,double h,double *p
 		model->rho[i] = rho;
 		model->u[i] = u;
 
-		fprintf(fp,"%g %g %g %g\n",r,rho,M,u);
+		fprintf(fp,"%15.7E %15.7E %15.7E %15.7E\n",r,rho,M,u);
 		fclose(fp);
 		++i;
 
@@ -306,11 +315,84 @@ double midPtRK(MODEL *model,int bSetModel,double rho,double u,double h,double *p
 		model->dr = h;
 	}
 
+    // Return values at the midpoint
     *pR = r;
-    return(M);
+    *pRho = rho;
+    *pU = u;
+    return(0);
 }
+#if 0
+NOT IMPLEMENTED YET.
+/*
+ * Solve the model for a given mass M and internal enery us
+ * at the surface. To obtain rho(r=0) and u(r=0) which are
+ * needed to currecly solve the structure equations, we first
+ * integrate from the surface in to obtain rhoc and uc and then
+ * use these values to calculate the final model.
+ */
+double modelSolve(MODEL *model,double M, double us) {
+    const int nStepsMax = 10000;
+    int bSetModel;
+    double rmax;
+    double dr,R;
+    double a,Ma,b,Mb,c,Mc;
 
+	/*
+	 * First estimate the maximum possible radius.
+	 */
+	R = cbrt(3.0*M/(4.0*M_PI*model->tillMat->rho0));
+	dr = R/nStepsMax;
+	a = 1.01*model->tillMat->rho0; /* starts with 1% larger central density */
+	Ma = midPtRK(model,bSetModel=0,a,uc,dr,&R);
+	fprintf(stderr,"first Ma:%g R:%g\n",Ma,R);
+	b = a;
+	Mb = 0.5*M;
 
+	while (Ma > M)
+	{
+		b = a;
+		Mb = Ma;
+		a = 0.5*(model->tillMat->rho0 + a);
+		Ma = midPtRK(model,bSetModel=0,a,uc,dr,&R);
+	}
+    while (Mb < M)
+	{
+		b = 2.0*b;
+	   	Mb = midPtRK(model,bSetModel=0,b,uc,dr,&R);	
+		fprintf(stderr,"first Mb:%g R:%g\n",Mb,R);
+	}
+
+	// (CR) Debug
+	fprintf(stderr,"Root bracketed.\n");
+
+    /*
+	 * Root bracketed by (a,b).
+	 */
+    while (Mb-Ma > 1e-10*Mc)
+	{
+		c = 0.5*(a + b);
+		Mc = midPtRK(model,bSetModel=0,c,uc,dr,&R);	
+		if (Mc < M)
+		{
+			a = c;
+			Ma = Mc;
+	    } else {
+			b = c;
+			Mb = Mc;
+		}
+//	fprintf(stderr,"c:%.10g Mc:%.10g R:%.10g\n",c/model->tillMat[0]->rho0,Mc,R);
+	}
+
+    /*
+	 * Solve it once more setting up the lookup table.
+	 */
+	fprintf(stderr,"rho_core: %g cv: %g uc: %g (in system units)\n",c,model->tillMat->cv,uc);
+	Mc = midPtRK(model,bSetModel=1,c,uc,dr,&R);
+	model->R = R;
+	return c;
+}
+#endif
+#if 0
 double modelSolve(MODEL *model,double M, double uc) {
     const int nStepsMax = 10000;
     int bSetModel;
@@ -372,17 +454,16 @@ double modelSolve(MODEL *model,double M, double uc) {
 	model->R = R;
 	return c;
 }
-
+#endif
 void main(int argc, char **argv)
 {
 	const int nStepsMax = 10000;
 //    double rhoCenter, uCenter, mTot;
 	// Model
     MODEL *model;
-	double rho, rhomin, rhomax;
-	double u, umin, umax;
-	int nRho, nU;
-	double dr,R, M, mTot;
+	double rho, rhoc, rhos;
+	double u, uc, us;
+	double dm, R, M, mTot;
 	int iMat;
     FILE *fp;
     int i,j;
@@ -407,65 +488,44 @@ void main(int argc, char **argv)
     assert(iMat >= 0);
 #endif
 
+    /*
+     * Hard code the values for a 1ME model.
+     */
 	// Hard code all values
-	mTot = 62.366;			// About 1 Earth mass
-	iMat = 0;				// Granite
-	rhomin = 1.05*7.33;		// 1.05*rho0
-	rhomax = 3.0*7.33;		// 3.0*rho0
-	umin = 1e-3;
-	umax = 22.0;			// umax > us2
-	
-	// Do a nRho x nU grid
-	nRho = 100;
-	nU = 100;
+	mTot    = 62.366;			// About 1 Earth mass
+	iMat    = 0;				// Granite
+    rhoc    = 19.6054;
+    uc      = 10.2;
+    rhos    = 7.32745;
+    us      = 0.333586;
+    R       = 1.04211;
+
+    double R_L, rho_L, u_L;
 
 	// Initialize model
 	model = modelInit(iMat);
-	tillInitLookup(model->tillMat);
+//	tillInitLookup(model->tillMat);
 
-	// Open output file
-    fp = fopen("modelsolve.txt","w");
-    assert(fp != NULL);
+    dm = mTot/(nStepsMax);
+    midPtRKIn(model, mTot, R, rhos, us, dm, 0.1*mTot, &R_L, &rho_L, &u_L);
+    M = 0.1*mTot;
 
-	M = mTot;
-	/*
-	 * First estimate the maximum possible radius.
-	 */
-	R = cbrt(3.0*M/(4.0*M_PI*model->tillMat->rho0));
-	dr = R/nStepsMax;
-	fprintf(stderr,"First guess: R= %g dr= %g\n", R, dr);
+    fprintf(stderr, "%15.7E ", mTot);
+    fprintf(stderr, "%15.7E ", R);
+    fprintf(stderr, "%15.7E ", rhos);
+    fprintf(stderr, "%15.7E ", us);
 
-#if 0
-	/*
-	 * Some special case to debug the code.
-	 */
-	rho = 19.6054;
-	u = 10.2;
-	M = midPtRK(model,1,rho,u,dr,&R);
-#endif
-	for (i=0; i<=nRho; i++)
-	{
-		rho = rhomin + (rhomax-rhomin)/nRho*i;
+    fprintf(stderr, "\n");
 
-		for (j=0; j<=nU; j++)
-		{
-			u = umin + (umax-umin)/nU*j;
-			// Solve the model for rho, M and u
-			M = midPtRK(model,0,rho,u,dr,&R);
+    fprintf(stderr, "%15.7E ", rhoc);
+    fprintf(stderr, "%15.7E ", uc);
+    fprintf(stderr, "\n");
 
-//			printf("i=%i j=%i rho=%15.7E u=%15.7E M=%15.7E\n",i,j,rho,u,M);
-//			fprintf(fp,"%15.7E",M);
-			if (M > 0.0 && fabs(M-mTot) < 0.05*mTot)
-			{
-				fprintf(fp,"%3i",1);
-			} else if (M < 0.0) {
-				fprintf(fp,"%3i",-1);
-			} else {
-				fprintf(fp,"%3i",0);
-			}
-		}
+    fprintf(stderr, "%15.7E ", M);
+    fprintf(stderr, "%15.7E ", R_L);
+    fprintf(stderr, "%15.7E ", rho_L);
+    fprintf(stderr, "%15.7E ", u_L);
 
-		fprintf(fp,"\n");
-	}
-	fclose(fp);
+    fprintf(stderr, "\n");
+
 }
