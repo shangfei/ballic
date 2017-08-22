@@ -57,8 +57,8 @@ multi.atm: ballic.multi.atm.o $(tipsy_objects) $(till_objects) $(fortran_objects
 	cc -o ballic.multi.atm ballic.multi.atm.o $(tipsy_objects) $(till_objects) $(fortran_objects) -lm
 
 # Calculates equilibrium models for a given material and different initial densities and internal energies.
-modelsolve: modelsolve.o $(till_objects)
-	cc -o modelsolve modelsolve.o $(till_objects) -lm
+modelsolve: modelsolve.o $(till_objects) nr/gaussj.o
+	cc -o modelsolve modelsolve.o $(till_objects) nr/gaussj.o -lm
 clean:
 	rm -f $(exe) $(objects)
 

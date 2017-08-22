@@ -15,6 +15,7 @@
 #include <assert.h>
 #include "tillotson/tillotson.h"
 #include "modelsolve.h"
+#include "nr/nrutil.h"
 
 /*
  * Initialize the variables and allocate memory.
@@ -112,13 +113,14 @@ double drhodm(MODEL *model, double M, double r, double rho, double u)
 	 */
 	assert(M>= 0.0);
 
-	if (M > 0.0)
+	if (r > 0.0)
 	{
 		// We assume G=1
-		return(-M/(r*r*r*r*(dPdrho + dPdu*dudrho(model,rho,u))));
+		return(-M/(4.0*M_PI*r*r*r*r*(dPdrho + dPdu*dudrho(model,rho,u))));
     } else {
 		// Avoid problems for m=0.
 		return(0.0);
+//        return(-1.0/(4.0*M_PI*(dPdrho + dPdu*dudrho(model,rho,u)))*pow((4.0*M_PI*rho/3.0),4.0/3.0)*pow(M,-1.0/3.0));
 	}
 }
 
@@ -128,7 +130,16 @@ double drhodm(MODEL *model, double M, double r, double rho, double u)
 double drdm(double r, double rho)
 {
 	assert(r >= 0.0);
-	return(1.0/(4.0*M_PI*r*r*rho));
+    if (r > 0.0)
+    {
+        return(1.0/(4.0*M_PI*r*r*rho));
+    } else {
+        /*
+         * Use an analytic expression (assuming rho=const.) in the center to
+         * start integration. If the user did not do that crash.
+         */
+        assert(0);
+    }
 }
 
 /*
@@ -160,6 +171,8 @@ int midPtRKIn(MODEL *model, double Mtot, double R, double rho0, double us, doubl
     assert(u > 0.0);
     assert(r > 0.0);
     assert(h > 0.0);
+
+    printf("%15.7E %15.7E %15.7E %15.7E\n", r, rho, M, u);
 
     while (M > M_mid)
 	{
@@ -193,7 +206,11 @@ int midPtRKIn(MODEL *model, double Mtot, double R, double rho0, double us, doubl
 	 */
     x = (M-M_mid)/h;
     assert(x <= 0.0);
-
+    
+    /*
+     * Stimmt da wirklich so, wir integrieren ja von aussen nach innen....
+     */
+    fprintf(stderr,"x= %15.7E\n", x);
 	M -= h*x;
 	r -= k2r*x;
 	rho -= k2rho*x;
@@ -237,13 +254,14 @@ int midPtRKOut(MODEL *model, int bSetModel, double rhoc, double uc, double h, do
 	/*
 	 * Check, if the initial values are below the cold curve.
 	 */
-	if (tillIsBelowColdCurve(model->tillMat, rho, u))
+/*
+    if (tillIsBelowColdCurve(model->tillMat, rho, u))
 	{
 		fprintf(stderr,"rhoc= %g uc= %g below the cold curve.\n", rho, u);
 		M = -1.0;
 		return(M);
 	}
-
+*/
     if (bSetModel)
 	{
 		i = 0;
@@ -255,7 +273,29 @@ int midPtRKOut(MODEL *model, int bSetModel, double rhoc, double uc, double h, do
 		assert(fp != NULL);
 		fprintf(fp,"%15.7E %15.7E %15.7E %15.7E\n", r, rho, M, u);
 		++i;
-	}
+	} else {
+        printf("%15.7E %15.7E %15.7E %15.7E\n", r, rho, M, u);
+    }
+
+    /*
+     * Because the derivatives diverge for M=0 and r=0 we use analytic
+     * expressions for r and rho to start the integration.
+     */
+    M = 1e-0*h;
+    r = pow(3.0*M/(4.0*M_PI*rhoc),1.0/3.0);
+
+    double dPdrho = tilldPdrho(model->tillMat, rhoc, uc); // dP/drho at u=const.
+    double dPdu = tilldPdu(model->tillMat, rhoc, uc); // dP/du at rho=const.
+    rho = rhoc - 3.0/(8.0*M_PI*(dPdrho + dPdu*dudrho(model, rhoc, uc)))*pow((4.0*M_PI*rhoc/3.0), 4.0/3.0)*pow(M, 2.0/3.0);
+    u = uc - tillPressure(model->tillMat,rhoc,uc)/(rhoc*rhoc)*3.0/(8.0*M_PI*(dPdrho + dPdu*dudrho(model, rhoc, uc)))*pow((4.0*M_PI*rhoc/3.0), 4.0/3.0)*pow(M, 2.0/3.0);
+    //u +=  1e-3*h*dudm(model, M, r, rho, u);
+/*
+    u +=  1e-3*h*dudm(model, M, r, rho, u);
+    rho +=  1e-3*h*drhodm(model, M, r, rho, u);
+    r = pow(3.0*M/(4.0*M_PI*rho),1.0/3.0);
+*/
+
+    printf("%15.7E %15.7E %15.7E %15.7E\n", r, rho, M, u);
 
     while (M <= M_mid)
 	{
@@ -284,7 +324,9 @@ int midPtRKOut(MODEL *model, int bSetModel, double rhoc, double uc, double h, do
 
 		    fprintf(fp,"%15.7E %15.7E %15.7E %15.7E\n", r, rho, M, u);
 			++i;
-	    }
+	    } else {
+            printf("%15.7E %15.7E %15.7E %15.7E\n", r, rho, M, u);
+        }
 	}
 
     /*
@@ -292,7 +334,7 @@ int midPtRKOut(MODEL *model, int bSetModel, double rhoc, double uc, double h, do
      * midPtRKOut().
 	 */
     x = (M-M_mid)/h;
-    assert(x <= 0.0);
+    //assert(x <= 0.0);
 
 	M += h*x;
 	r += k2r*x;
@@ -313,7 +355,9 @@ int midPtRKOut(MODEL *model, int bSetModel, double rhoc, double uc, double h, do
 
 		model->nTable = i;
 		model->dr = h;
-	}
+	} else {
+        printf("%15.7E %15.7E %15.7E %15.7E\n", r, rho, M, u);
+    }
 
     // Return values at the midpoint
     *pR = r;
@@ -321,6 +365,433 @@ int midPtRKOut(MODEL *model, int bSetModel, double rhoc, double uc, double h, do
     *pU = u;
     return(0);
 }
+
+#if 0
+void LinEquationSolver(MODEL *model, double *a, double *b, int n)
+{
+    float **A = matrix(1, n, 1, n);
+    // Setting m=1 since we only have one right hand side vector b
+    float **B = matrix(1, n, 1, 1);
+    int i, j;
+
+    fprintf(stderr,"n= %i\n", n);
+#if 0
+    for (i=0; i<n; i++)
+    {
+//        B[i+1][1] = b[i];
+        B[i+1][1] = 1;
+        for (j=0; j<n; j++)
+        {
+            /*
+             * Remember that NR arrays start from one while C arrays always
+             * start from 0.
+             */
+//            A[i+1][j+1] = a[i*n + j];
+            A[i+1][j+1] = 1/(i+j;
+        }
+    }
+#endif
+    for (i=1; i<=n; i++)
+    {
+        B[i][1] = 0.0;
+        for (j=1; j<=n; j++)
+        {
+            A[i][j] = 1.0/(i+j);
+        }
+    }
+/*
+    n = 2;
+    A[1][1] = 2.0;
+    A[1][2] = 1.0;
+    A[2][1] = 1.0;
+    A[2][2] = 2.0;
+*/
+    /*
+     * Print the matrix A and vector b.
+     */
+    for (i=1; i<=n; i++)
+    {
+        printf("A= ");
+        for (j=1; j<=n; j++)
+        {
+            printf("%15.7E  ", A[i][j]);
+        }
+
+        printf(" b= %15.7E\n", B[i][1]);
+    }
+    printf("\n");
+    printf("Calling gaussj()...\n");
+    printf("\n");
+
+    gaussj(A, n, B, 1);
+
+    /*
+     * Print the matrix A and vector b.
+     */
+    for (i=1; i<=n; i++)
+    {
+/*        printf("A= ");
+        for (j=1; j<=n; j++)
+        {
+            printf("%15.7E  ", A[i][j]);
+        }
+*/
+        printf(" b= %15.7E\n", B[i][1]);
+    }
+
+}
+#endif
+
+void GaussJordanTest(int n)
+{
+#if 0
+    float **A = matrix(1, n, 1, n);
+    float **A_old = matrix(1, n, 1, n);
+    float **Id = matrix(1, n, 1, n);
+    // Setting m=1 since we only have one right hand side vector b
+    float **b = matrix(1, n, 1, 1);
+#endif
+    double **A = dmatrix(1, n, 1, n);
+    double **A_old = dmatrix(1, n, 1, n);
+    double **Id = dmatrix(1, n, 1, n);
+    // Setting m=1 since we only have one right hand side vector b
+    double **b = dmatrix(1, n, 1, 1);
+    int i, j, k;
+
+    fprintf(stderr,"n= %i\n", n);
+    
+    /*
+     * Setup the matrix A and the vector b.
+     */
+    for (i=1; i<=n; i++)
+    {
+        b[i][1] = 1.0;
+
+        for (j=1; j<=n; j++)
+        {
+            A[i][j] = 1.0/(i+j);
+            A_old[i][j] = A[i][j];
+        }
+    }
+/*
+    n = 2;
+    A[1][1] = 2.0;
+    A[1][2] = 1.0;
+    A[2][1] = 1.0;
+    A[2][2] = 2.0;
+*/
+    /*
+     * Print the matrix A and vector b.
+     */
+    printf("\n");
+    printf("Original A and b:\n");
+    printf("\n");
+    for (i=1; i<=n; i++)
+    {
+        printf("A= ");
+        for (j=1; j<=n; j++)
+        {
+            printf("%15.7E  ", A[i][j]);
+        }
+
+        printf(" b= %15.7E\n", b[i][1]);
+    }
+
+    printf("\n");
+    printf("Calling gaussj()...\n");
+    printf("\n");
+
+    gaussj(A, n, b, 1);
+
+    /*
+     * Print the matrix A and vector b.
+     */
+    printf("\n");
+    printf("Inverse of A and solution b:\n");
+    printf("\n");
+    for (i=1; i<=n; i++)
+    {
+        printf("A= ");
+        for (j=1; j<=n; j++)
+        {
+            printf("%15.7E  ", A[i][j]);
+        }
+
+        printf(" b= %15.7E\n", b[i][1]);
+    }
+
+    /*
+     * Calculate A*A_old to see if we get the identity matrix Id.
+     */
+    for (i=1; i<=n; i++)
+    {
+        for (j=1; j<=n; j++)
+        {
+            Id[i][j] = 0.0;
+            for (k=1; k<=n; k++)
+            {
+                Id[i][j] += A[i][k]*A_old[k][j];
+            }
+        }
+    }
+
+    /*
+     * Print the identity matrix Id.
+     */
+    printf("\n");
+    printf("Id:\n");
+    printf("\n");
+    for (i=1; i<=n; i++)
+    {
+        for (j=1; j<=n; j++)
+        {
+            printf("%15.7E  ", Id[i][j]);
+        }
+        printf("\n");
+    }
+}
+
+/*
+ * This function uses the difference
+ * ddx = (x2_R-x2_L)-(x1_R-x1_L)
+ * between two lightly different initial guesses dx of initial values of for R, rhoc
+ * and uc to predict for which values the difference x_R-x_L of the solutions at the
+ * matching point will vanish solving a linear system of equations with the
+ * Gauss-Jordan method. The estimated corrections for R, rhoc and uc are returned in
+ * pDelta.
+ *
+ * dR = R_new - R_old
+ * drhoc = rhoc_new - rhoc_old
+ * duc = uc_new - uc_old
+ * ddR = (R_L_new-R_R_new)-(R_L_old-R_R_old)
+ * ddrho = (rho_L_new-rho_R_new)-(rho_L_old-rho_R_old)
+ * ddu = (u_L_new-u_R_new)-(U_L_old-u_R_old)
+ */
+void modelGetNewInitialGuess(double dR, double drhoc, double duc, double ddR, double ddrho, double ddu, double *pDelta)
+{
+   /*
+    * The matrix A contains the (numerical) derivatives of dx with respect to
+    * the variables R, rhoc and uc.
+    */
+    double **A = dmatrix(1, 3, 1, 3);
+    double **b = dmatrix(1, 3, 1, 1);
+    int i,j;
+    // Note that NR addresses arrays from one while in C arrays start at zero.
+    A[1][1] = ddR/dR;
+    A[1][2] = ddR/drhoc;
+    A[1][3] = ddR/duc;
+
+    A[2][1] = ddrho/dR;
+    A[2][2] = ddrho/drhoc;
+    A[2][3] = ddrho/duc;
+
+    A[3][1] = ddu/dR;
+    A[3][2] = ddu/drhoc;
+    A[3][3] = ddu/duc;
+
+    b[1][1] = 0.0;
+    b[2][1] = 0.0;
+    b[3][1] = 0.0;
+    
+    fprintf(stderr, "A:\n");
+    for (i=1; i<=3; i++)
+    {
+        for (j=1; j<=3; j++)
+        {
+            fprintf(stderr, "%i,%i: %15.7E  ", i, j, A[i][j]);
+        }
+        fprintf(stderr,"\n");
+    }
+    /*
+     * Call the Gauss-Jordan method from NR, the solution is returned in b.
+     */
+    gaussj(A, 3, b, 1);
+
+    fprintf(stderr, "Called gaussj()\n");
+
+    fprintf(stderr, "A:\n");
+    for (i=1; i<=3; i++)
+    {
+        for (j=1; j<=3; j++)
+        {
+            fprintf(stderr, "%i,%i: %15.7E  ", i, j, A[i][j]);
+        }
+        fprintf(stderr,"\n");
+    }
+
+    fprintf(stderr, "\n");
+    fprintf(stderr, "b:\n");
+    for (i=1; i<=3; i++)
+    {
+        fprintf(stderr, "%i: %15.7E  ", i,  b[i][1]);
+    }
+    fprintf(stderr, "\n");
+    fprintf(stderr, "\n");
+
+    for (i=1; i<=3; i++)
+    {
+        fprintf(stderr, "%i: %15.7E  ", i,  b[i][1]);
+    }
+    fprintf(stderr, "\n");
+    pDelta[0] = b[1][1];
+    pDelta[1] = b[2][1];
+    pDelta[2] = b[3][1];
+    
+    // Free memory
+    free_dmatrix(A, 1, 3, 1, 3);
+    free_dmatrix(b, 1, 3, 1, 1);
+}
+
+void modelSolveToMatchingPoint(MODEL *model, double rhoc, double uc, double M, double R, double rhos, double us, double M_mid, double dm, double *dR, double *drho, double *du)
+{
+    double R_L, R_R, rho_L, rho_R, u_L, u_R;
+    int bSetModel;
+
+    /*
+     * First integrate from the surface to the matching point M_mid. The values
+     * of R, rho and u at M_mid are returned in R_L, rho_L and u_L.
+     */
+    midPtRKIn(model, M, R, rhos, us, dm, M_mid, &R_L, &rho_L, &u_L);
+
+    /*
+     * Then integrate from the core (m=0) to the matching point.
+     */
+    midPtRKOut(model, bSetModel=0, rhoc, uc, dm, M_mid, &R_R, &rho_R, &u_R);
+
+    /*
+     * Return the differences between R, rho and u at the matching point.
+     */
+    *dR = R_L-R_R;
+    *drho = rho_L-rho_R;
+    *du = u_L-u_R;
+}
+
+/*
+ * Solve a single component model for a given mass M, density rhos and internal
+ * energy us at the surface.
+ *
+ * Because the b.c are given both at the core and the surface and the
+ * underlaying ODE's do not behave well at the core (r=0 and m=0) we use the
+ * matching point method (ref?) to solve the models. The basic idea here is to
+ * solve the ODE's from and surface and the core and make the solutions match
+ * at a given point. Since the mass is well defined both at the core and the
+ * surface we use it as an independent variable.
+ */
+void modelSolveSingle(MODEL *model, double Mtot, double rhos, double us)
+{
+    double M_mid, R_old, R_new, rhoc_old, rhoc_new, uc_old, uc_new, dm;
+    double R_L, R_R, rho_L, rho_R, u_L, u_R;
+    double dR_old, dR_new, drho_old, drho_new, du_old, du_new;
+    double ddR, ddrho, ddu;
+    double *Delta;
+    int bSetModel;
+
+    // This vector stores the suggested changes in R, rhoc and uc
+    Delta = (double *) malloc(3*sizeof(double));
+
+    /*
+     * As a first step the model is solved for two slighly different initial
+     * guesses for the parameters R, rhoc and uc. As initial guesses for R,
+     * rhoc, and uc we use:
+     *
+     * R = (3.0*Mtot/(4.0*M_PI*rho0))
+     * rhoc = 1.1*rho_L (obtained from the first integration from the surface)
+     * uc = 1.1*uc
+     */
+    R_old = cbrt(3.0*Mtot/(4.0*M_PI*model->tillMat->rho0));
+
+    M_mid = 0.5*Mtot;
+    dm = Mtot/model->nTableMax;
+
+    midPtRKIn(model, Mtot, R_old, rhos, us, dm, M_mid, &R_L, &rho_L, &u_L);
+
+    /*
+     * Since rho(m=0)=rhoc and u(m=0)=uc are unknown we use the left hand side
+     * values at the matching point to get a first guess.
+     */
+    rhoc_old = 2.0*rho_L;
+    uc_old = 2.0*u_L;
+
+    midPtRKOut(model, bSetModel=0, rhoc_old, uc_old, dm, M_mid, &R_R, &rho_R, &u_R);
+    
+    dR_old = R_L-R_R;
+    drho_old = rho_L-rho_R;
+    du_old = u_L-u_R;
+
+    /*
+     * The second step to initialize the iteration is to slightly perturb the
+     * initial values R_old, rhoc_old and uc_old to obtain
+     */
+    R_new = 0.9*R_old;
+    rhoc_new = 0.9*rhoc_old;
+    uc_new = 0.9*uc_old;
+
+    modelSolveToMatchingPoint(model, rhoc_new, uc_new, Mtot, R_new, rhos, us, M_mid, dm, &dR_new, &drho_new, &du_new);
+
+    /*
+     * Now that we have initial values for all the free parameters (R, rhoc,
+     * uc) and their correspondinding differences at the matching point we
+     * can inerate until the solutions at M_mid are matching
+     * (dR_new-dR_old < eps, drho_new-drho_old < eps, du_new-du_old < eps).
+     */
+    ddR = dR_new - dR_old;
+    ddrho = drho_new - drho_old;
+    ddu = du_new - du_old;
+
+    fprintf(stderr,"Starting interation:\n");
+    fprintf(stderr,"R_old=  %15.7E rhoc_old=  %15.7E uc_old=  %15.7E\n", R_old, rhoc_old, uc_old);
+    fprintf(stderr,"R_new=  %15.7E rhoc_new=  %15.7E uc_new=  %15.7E\n", R_new, rhoc_new, uc_new);
+    fprintf(stderr,"dR_old= %15.7E drho_old= %15.7E du_old= %15.7E\n", dR_old, drho_old, du_old);
+    fprintf(stderr,"dR_new= %15.7E drho_new= %15.7E du_new= %15.7E\n", dR_new, drho_new, du_new);
+    fprintf(stderr,"\n");
+
+    fprintf(stderr,"ddR= %15.7E ddrho= %15.7E ddu= %15.7E\n", ddR, ddrho, ddu);
+    fprintf(stderr,"\n");
+
+    while (sqrt(ddR*ddR+ddrho*ddrho+ddu*ddu) > 1e-10)
+#define EPS 1e-3
+//    while (ddR > EPS && ddrho > EPS && ddu > EPS)
+    {
+        fprintf(stderr,"Interation:\n");
+        fprintf(stderr,"dR_old= %15.7E drhoc_old= %15.7E duc_old= %15.7E\n", dR_old, drho_old, du_old);
+        fprintf(stderr,"dR_new= %15.7E drhoc_new= %15.7E duc_new= %15.7E\n", dR_new, drho_new, du_new);
+
+        modelGetNewInitialGuess(R_new-R_old, rhoc_new-rhoc_old, uc_new-uc_old, ddR, ddrho, ddu, Delta);
+        fprintf(stderr,"Delta= %15.7E, %15.7E, %15.7E\n", Delta[0], Delta[1], Delta[2]); 
+        /*
+         * Store the values from the last iteration.
+         */
+        R_old = R_new;
+        rhoc_old = rhoc_new;
+        uc_old = uc_new;
+        dR_old = dR_new;
+        drho_old = drho_new;
+        du_old = du_new;
+
+        /*
+         * Update the guess for R, rhoc and uc and solve the model using these
+         * new values.
+         */
+        R_new = R_old+Delta[0];
+        rhoc_new = rhoc_old+Delta[1];
+        uc_new = uc_old+Delta[2];
+        
+        modelSolveToMatchingPoint(model, rhoc_new, uc_new, Mtot, R_new, rhos, us, M_mid, dm, &dR_new, &drho_new, &du_new);
+
+        fprintf(stderr,"dR_old= %15.7E drhoc_old= %15.7E duc_old= %15.7E\n", dR_old, drho_old, du_old);
+        fprintf(stderr,"dR_new= %15.7E drhoc_new= %15.7E duc_new= %15.7E\n", dR_new, drho_new, du_new);
+        fprintf(stderr,"\n");
+
+        ddR = dR_new - dR_old;
+        ddrho = drho_new - drho_old;
+        ddu = du_new - du_old;
+    }
+
+    fprintf(stderr,"Final values:\n");
+    fprintf(stderr,"R= %15.7E rhoc= %15.7E uc= %15.7E\n", R_new, rhoc_new, uc_new);
+}
+
+
 #if 0
 NOT IMPLEMENTED YET.
 /*
@@ -458,6 +929,7 @@ double modelSolve(MODEL *model,double M, double uc) {
 void main(int argc, char **argv)
 {
 	const int nStepsMax = 10000;
+    int bSetModel;
 //    double rhoCenter, uCenter, mTot;
 	// Model
     MODEL *model;
@@ -500,32 +972,74 @@ void main(int argc, char **argv)
     us      = 0.333586;
     R       = 1.04211;
 
-    double R_L, rho_L, u_L;
-
+    double R_L, rho_L, u_L, R_R, rho_R, u_R;
+    double M_mid;
 	// Initialize model
 	model = modelInit(iMat);
 //	tillInitLookup(model->tillMat);
 
     dm = mTot/(nStepsMax);
-    midPtRKIn(model, mTot, R, rhos, us, dm, 0.1*mTot, &R_L, &rho_L, &u_L);
-    M = 0.1*mTot;
+    M_mid = 0.5*mTot;
 
-    fprintf(stderr, "%15.7E ", mTot);
-    fprintf(stderr, "%15.7E ", R);
-    fprintf(stderr, "%15.7E ", rhos);
-    fprintf(stderr, "%15.7E ", us);
+    /*
+     * Test the solver for a single component model.
+     */
+    modelSolveSingle(model, mTot, rhos, us);
+    exit(1);
+
+    /*
+     * Test the Gauss-Jordan elimination method.
+     */
+    GaussJordanTest(3);
+//    LinEquationSolver(model, NULL, NULL, 3);
+    exit(1);
+//#if 0
+    /*
+     * Solve the model from the surface.
+     */
+    midPtRKIn(model, mTot, R, rhos, us, dm, M_mid, &R_L, &rho_L, &u_L);
+
+    fprintf(stderr, "mTot= %15.7E ", mTot);
+    fprintf(stderr, "R= %15.7E ", R);
+    fprintf(stderr, "rhos= %15.7E ", rhos);
+    fprintf(stderr, "us= %15.7E ", us);
 
     fprintf(stderr, "\n");
 
-    fprintf(stderr, "%15.7E ", rhoc);
-    fprintf(stderr, "%15.7E ", uc);
+    fprintf(stderr, "rhoc= %15.7E ", rhoc);
+    fprintf(stderr, "uc= %15.7E ", uc);
     fprintf(stderr, "\n");
 
-    fprintf(stderr, "%15.7E ", M);
-    fprintf(stderr, "%15.7E ", R_L);
-    fprintf(stderr, "%15.7E ", rho_L);
-    fprintf(stderr, "%15.7E ", u_L);
+    fprintf(stderr, "M_mid= %15.7E ", M_mid);
+    fprintf(stderr, "R_L= %15.7E ", R_L);
+    fprintf(stderr, "rho_L= %15.7E ", rho_L);
+    fprintf(stderr, "u_L= %15.7E ", u_L);
+
+    fprintf(stderr, "\n");
+//#endif
+
+//#if 0
+    /*
+     * Solve the model from the core.
+     */
+    //M_mid = 1.0*mTot;
+    midPtRKOut(model, bSetModel=0, rhoc, uc, dm/100.0, M_mid, &R_R, &rho_R, &u_R);
+    fprintf(stderr, "mTot= %15.7E ", mTot);
+    fprintf(stderr, "R= %15.7E ", R);
+    fprintf(stderr, "rhos= %15.7E ", rhos);
+    fprintf(stderr, "us= %15.7E ", us);
 
     fprintf(stderr, "\n");
 
+    fprintf(stderr, "rhoc= %15.7E ", rhoc);
+    fprintf(stderr, "uc= %15.7E ", uc);
+    fprintf(stderr, "\n");
+
+    fprintf(stderr, "M_mid= %15.7E ", M_mid);
+    fprintf(stderr, "R_R= %15.7E ", R_R);
+    fprintf(stderr, "rho_R= %15.7E ", rho_R);
+    fprintf(stderr, "u_R= %15.7E ", u_R);
+
+    fprintf(stderr, "\n");
+//#endif
 }
