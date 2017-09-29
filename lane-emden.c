@@ -162,8 +162,8 @@ int WriteModeltoFile(MODEL *model, const char *Name)
 
     for (i=0; i<model->nTable; i++)
     {
-        fprintf(fp,"%15.7E %15.7E\n", model->z[i], model->w1[i]);
-//        fprintf(fp,"%15.7E %15.7E %15.7E %15.7E %15.7E %15.7E %15.7E\n", model->z[i], model->w1[i], model->r[i], model->rho[i], model->M[i], model->u[i], CalcGrav(model->r[i], model->M[i]));
+//        fprintf(fp,"%15.7E %15.7E\n", model->z[i], model->w1[i]);
+        fprintf(fp,"%15.7E %15.7E %15.7E %15.7E %15.7E %15.7E %15.7E\n", model->z[i], model->w1[i], model->r[i], model->rho[i], model->M[i], model->u[i], CalcGrav(model->r[i], model->M[i]));
     }
 
     fclose(fp);
