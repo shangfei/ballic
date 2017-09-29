@@ -59,6 +59,20 @@ multi.atm: ballic.multi.atm.o $(tipsy_objects) $(till_objects) $(fortran_objects
 # Calculates equilibrium models for a given material and different initial densities and internal energies.
 modelsolve: modelsolve.o $(till_objects) nr/gaussj.o
 	cc -o modelsolve modelsolve.o $(till_objects) nr/gaussj.o -lm
+
+#
+# Calculates equilibrium models for a given material and different initial densities and internal energies
+# using the structure equations as proposed in Alibert (2014).
+#
+modelsolve.alibert: modelsolve.alibert.o $(till_objects)
+	cc -o modelsolve.alibert modelsolve.alibert.o $(till_objects) -lm
+
+#
+# Solves the Lane-Emden equation.
+#
+lane-emden: lane-emden.o 
+	cc -o lane-emden lane-emden.o -lm
+
 clean:
 	rm -f $(exe) $(objects)
 

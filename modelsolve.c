@@ -554,20 +554,25 @@ void GaussJordanTest(int n)
 /*
  * This function uses the difference
  * ddx = (x2_R-x2_L)-(x1_R-x1_L)
- * between two lightly different initial guesses dx of initial values of for R, rhoc
- * and uc to predict for which values the difference x_R-x_L of the solutions at the
- * matching point will vanish solving a linear system of equations with the
- * Gauss-Jordan method. The estimated corrections for R, rhoc and uc are returned in
- * pDelta.
+ * between two lightly different initial guesses dx of initial values of for R,
+ * rhoc and uc to predict for which values the difference x_R-x_L of the
+ * solutions at the matching point will vanish solving a linear system of
+ * equations with the Gauss-Jordan method. The estimated corrections for R,
+ * rhoc and uc are returned in pDelta.
  *
  * dR = R_new - R_old
  * drhoc = rhoc_new - rhoc_old
  * duc = uc_new - uc_old
- * ddR = (R_L_new-R_R_new)-(R_L_old-R_R_old)
- * ddrho = (rho_L_new-rho_R_new)-(rho_L_old-rho_R_old)
- * ddu = (u_L_new-u_R_new)-(U_L_old-u_R_old)
+ *
+ * Y_R = R_L - R_R (values of the old solution?)
+ * Y_rho = rho_L - rho_R
+ * Y_u=u_L - u_R
+ *
+ * dY_R = Y_R_new-Y_R_old           (where Y_R=R_L-R_R)
+ * dY_rho = Y_rho_new-Y_rho_old     (where Y_rho=rho_L-rho_R)
+ * dY_u = Y_u_new-Y_u_old           (where Y_u=u_L-u_R)
  */
-void modelGetNewInitialGuess(double dR, double drhoc, double duc, double ddR, double ddrho, double ddu, double *pDelta)
+void modelGetNewInitialGuess(double dR, double drhoc, double duc, double Y_R, double Y_rho, double Y_u, double dY_R, double dY_rho, double dY_u, double *pDelta)
 {
    /*
     * The matrix A contains the (numerical) derivatives of dx with respect to
@@ -577,22 +582,26 @@ void modelGetNewInitialGuess(double dR, double drhoc, double duc, double ddR, do
     double **b = dmatrix(1, 3, 1, 1);
     int i,j;
     // Note that NR addresses arrays from one while in C arrays start at zero.
-    A[1][1] = ddR/dR;
-    A[1][2] = ddR/drhoc;
-    A[1][3] = ddR/duc;
+    A[1][1] = dY_R/dR;
+    A[1][2] = dY_R/drhoc;
+    A[1][3] = dY_R/duc;
 
-    A[2][1] = ddrho/dR;
-    A[2][2] = ddrho/drhoc;
-    A[2][3] = ddrho/duc;
+    A[2][1] = dY_rho/dR;
+    A[2][2] = dY_rho/drhoc;
+    A[2][3] = dY_rho/duc;
 
-    A[3][1] = ddu/dR;
-    A[3][2] = ddu/drhoc;
-    A[3][3] = ddu/duc;
+    A[3][1] = dY_u/dR;
+    A[3][2] = dY_u/drhoc;
+    A[3][3] = dY_u/duc;
 
-    b[1][1] = 0.0;
-    b[2][1] = 0.0;
-    b[3][1] = 0.0;
-    
+    /*
+     * Set b to (Y_R_old, Y_rho_old, Y_u_old).
+     */
+    b[1][1] = -Y_R;
+    b[2][1] = -Y_rho;
+    b[3][1] = -Y_u;
+
+    /*
     fprintf(stderr, "A:\n");
     for (i=1; i<=3; i++)
     {
@@ -602,6 +611,19 @@ void modelGetNewInitialGuess(double dR, double drhoc, double duc, double ddR, do
         }
         fprintf(stderr,"\n");
     }
+    */
+
+    fprintf(stderr, "A:\n");
+    for (i=1; i<=3; i++)
+    {
+        for (j=1; j<=3; j++)
+        {
+            fprintf(stderr, "%i,%i: %15.7g  ", i, j, A[i][j]);
+        }
+        fprintf(stderr,"\n");
+    }
+
+    fprintf(stderr, "Calling gaussj()\n");
     /*
      * Call the Gauss-Jordan method from NR, the solution is returned in b.
      */
@@ -626,13 +648,7 @@ void modelGetNewInitialGuess(double dR, double drhoc, double duc, double ddR, do
         fprintf(stderr, "%i: %15.7E  ", i,  b[i][1]);
     }
     fprintf(stderr, "\n");
-    fprintf(stderr, "\n");
 
-    for (i=1; i<=3; i++)
-    {
-        fprintf(stderr, "%i: %15.7E  ", i,  b[i][1]);
-    }
-    fprintf(stderr, "\n");
     pDelta[0] = b[1][1];
     pDelta[1] = b[2][1];
     pDelta[2] = b[3][1];
@@ -681,8 +697,8 @@ void modelSolveSingle(MODEL *model, double Mtot, double rhos, double us)
 {
     double M_mid, R_old, R_new, rhoc_old, rhoc_new, uc_old, uc_new, dm;
     double R_L, R_R, rho_L, rho_R, u_L, u_R;
-    double dR_old, dR_new, drho_old, drho_new, du_old, du_new;
-    double ddR, ddrho, ddu;
+    double Y_R_old, Y_R_new, Y_rho_old, Y_rho_new, Y_u_old, Y_u_new;
+    double dY_R, dY_rho, dY_u;
     double *Delta;
     int bSetModel;
 
@@ -696,9 +712,16 @@ void modelSolveSingle(MODEL *model, double Mtot, double rhos, double us)
      *
      * R = (3.0*Mtot/(4.0*M_PI*rho0))
      * rhoc = 1.1*rho_L (obtained from the first integration from the surface)
-     * uc = 1.1*uc
+     * uc = 1.1*uc      (obtained from the first integration from the surface)
      */
     R_old = cbrt(3.0*Mtot/(4.0*M_PI*model->tillMat->rho0));
+
+    /*
+     * CR: Try to get a better first guess by using rho_mean rather than rho0.
+     */
+    R_old = cbrt(3.0*Mtot/(4.0*M_PI*13.16));
+    R_old = 1.043;
+    R_old = 1.2;
 
     M_mid = 0.5*Mtot;
     dm = Mtot/model->nTableMax;
@@ -709,64 +732,75 @@ void modelSolveSingle(MODEL *model, double Mtot, double rhos, double us)
      * Since rho(m=0)=rhoc and u(m=0)=uc are unknown we use the left hand side
      * values at the matching point to get a first guess.
      */
-    rhoc_old = 2.0*rho_L;
-    uc_old = 2.0*u_L;
+    rhoc_old = 3.0*rho_L;
+    uc_old = 2.5*u_L;
+    rhoc_old = 19.6054;
+    uc_old = 10.2;
 
     midPtRKOut(model, bSetModel=0, rhoc_old, uc_old, dm, M_mid, &R_R, &rho_R, &u_R);
-    
-    dR_old = R_L-R_R;
-    drho_old = rho_L-rho_R;
-    du_old = u_L-u_R;
+
+    /*
+     * Y_i = xi_L - xi_R
+     */
+    Y_R_old = R_L-R_R;
+    Y_rho_old = rho_L-rho_R;
+    Y_u_old = u_L-u_R;
 
     /*
      * The second step to initialize the iteration is to slightly perturb the
      * initial values R_old, rhoc_old and uc_old to obtain
      */
-    R_new = 0.9*R_old;
-    rhoc_new = 0.9*rhoc_old;
-    uc_new = 0.9*uc_old;
+/*    R_new = 0.9999*R_old;
+    rhoc_new = 0.9999*rhoc_old;
+    uc_new = 0.9999*uc_old;
+*/
 
-    modelSolveToMatchingPoint(model, rhoc_new, uc_new, Mtot, R_new, rhos, us, M_mid, dm, &dR_new, &drho_new, &du_new);
-
+    R_new = 1.0001*R_old;
+    rhoc_new = 1.0001*rhoc_old;
+    uc_new = 1.0001*uc_old;
+    modelSolveToMatchingPoint(model, rhoc_new, uc_new, Mtot, R_new, rhos, us, M_mid, dm, &Y_R_new, &Y_rho_new, &Y_u_new);
+    
     /*
      * Now that we have initial values for all the free parameters (R, rhoc,
      * uc) and their correspondinding differences at the matching point we
      * can inerate until the solutions at M_mid are matching
      * (dR_new-dR_old < eps, drho_new-drho_old < eps, du_new-du_old < eps).
      */
-    ddR = dR_new - dR_old;
-    ddrho = drho_new - drho_old;
-    ddu = du_new - du_old;
+    dY_R = Y_R_new - Y_R_old;
+    dY_rho = Y_rho_new - Y_rho_old;
+    dY_u = Y_u_new - Y_u_old;
 
     fprintf(stderr,"Starting interation:\n");
     fprintf(stderr,"R_old=  %15.7E rhoc_old=  %15.7E uc_old=  %15.7E\n", R_old, rhoc_old, uc_old);
     fprintf(stderr,"R_new=  %15.7E rhoc_new=  %15.7E uc_new=  %15.7E\n", R_new, rhoc_new, uc_new);
-    fprintf(stderr,"dR_old= %15.7E drho_old= %15.7E du_old= %15.7E\n", dR_old, drho_old, du_old);
-    fprintf(stderr,"dR_new= %15.7E drho_new= %15.7E du_new= %15.7E\n", dR_new, drho_new, du_new);
+    fprintf(stderr,"dR=  %15.7E drhoc=  %15.7E duc=  %15.7E\n", R_new-R_old, rhoc_new-rhoc_old, uc_new-uc_old);
+    fprintf(stderr,"Y_R_old= %15.7E Y_rho_old= %15.7E Y_u_old= %15.7E\n", Y_R_old, Y_rho_old, Y_u_old);
+    fprintf(stderr,"Y_R_new= %15.7E Y_rho_new= %15.7E Y_u_new= %15.7E\n", Y_R_new, Y_rho_new, Y_u_new);
     fprintf(stderr,"\n");
 
-    fprintf(stderr,"ddR= %15.7E ddrho= %15.7E ddu= %15.7E\n", ddR, ddrho, ddu);
+    fprintf(stderr,"dY_R= %15.7E dY_rho= %15.7E dY_u= %15.7E\n", dY_R, dY_rho, dY_u);
     fprintf(stderr,"\n");
 
-    while (sqrt(ddR*ddR+ddrho*ddrho+ddu*ddu) > 1e-10)
+    while (sqrt(dY_R*dY_R+dY_rho*dY_rho+dY_u*dY_u) > 1e-10)
 #define EPS 1e-3
 //    while (ddR > EPS && ddrho > EPS && ddu > EPS)
     {
         fprintf(stderr,"Interation:\n");
-        fprintf(stderr,"dR_old= %15.7E drhoc_old= %15.7E duc_old= %15.7E\n", dR_old, drho_old, du_old);
-        fprintf(stderr,"dR_new= %15.7E drhoc_new= %15.7E duc_new= %15.7E\n", dR_new, drho_new, du_new);
+        fprintf(stderr,"Y_R_old= %15.7E Y_rhoc_old= %15.7E Y_uc_old= %15.7E\n", Y_R_old, Y_rho_old, Y_u_old);
+        fprintf(stderr,"Y_R_new= %15.7E Y_rhoc_new= %15.7E Y_uc_new= %15.7E\n", Y_R_new, Y_rho_new, Y_u_new);
 
-        modelGetNewInitialGuess(R_new-R_old, rhoc_new-rhoc_old, uc_new-uc_old, ddR, ddrho, ddu, Delta);
+        modelGetNewInitialGuess(R_new-R_old, rhoc_new-rhoc_old, uc_new-uc_old, Y_R_old, Y_rho_old, Y_u_old, dY_R, dY_rho, dY_u, Delta);
         fprintf(stderr,"Delta= %15.7E, %15.7E, %15.7E\n", Delta[0], Delta[1], Delta[2]); 
+
         /*
          * Store the values from the last iteration.
          */
         R_old = R_new;
         rhoc_old = rhoc_new;
         uc_old = uc_new;
-        dR_old = dR_new;
-        drho_old = drho_new;
-        du_old = du_new;
+        Y_R_old = Y_R_new;
+        Y_rho_old = Y_rho_new;
+        Y_u_old = Y_u_new;
 
         /*
          * Update the guess for R, rhoc and uc and solve the model using these
@@ -776,15 +810,15 @@ void modelSolveSingle(MODEL *model, double Mtot, double rhos, double us)
         rhoc_new = rhoc_old+Delta[1];
         uc_new = uc_old+Delta[2];
         
-        modelSolveToMatchingPoint(model, rhoc_new, uc_new, Mtot, R_new, rhos, us, M_mid, dm, &dR_new, &drho_new, &du_new);
+        modelSolveToMatchingPoint(model, rhoc_new, uc_new, Mtot, R_new, rhos, us, M_mid, dm, &Y_R_new, &Y_rho_new, &Y_u_new);
 
-        fprintf(stderr,"dR_old= %15.7E drhoc_old= %15.7E duc_old= %15.7E\n", dR_old, drho_old, du_old);
-        fprintf(stderr,"dR_new= %15.7E drhoc_new= %15.7E duc_new= %15.7E\n", dR_new, drho_new, du_new);
+        fprintf(stderr,"Y_R_old= %15.7E Y_rhoc_old= %15.7E Y_uc_old= %15.7E\n", Y_R_old, Y_rho_old, Y_u_old);
+        fprintf(stderr,"Y_R_new= %15.7E Y_rhoc_new= %15.7E Y_uc_new= %15.7E\n", Y_R_new, Y_rho_new, Y_u_new);
         fprintf(stderr,"\n");
 
-        ddR = dR_new - dR_old;
-        ddrho = drho_new - drho_old;
-        ddu = du_new - du_old;
+        dY_R = Y_R_new - Y_R_old;
+        dY_rho = Y_rho_new - Y_rho_old;
+        dY_u = Y_u_new - Y_u_old;
     }
 
     fprintf(stderr,"Final values:\n");
@@ -991,7 +1025,6 @@ void main(int argc, char **argv)
      * Test the Gauss-Jordan elimination method.
      */
     GaussJordanTest(3);
-//    LinEquationSolver(model, NULL, NULL, 3);
     exit(1);
 //#if 0
     /*

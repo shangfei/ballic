@@ -46,7 +46,7 @@ double drhodm(MODEL *model, double M, double r, double rho, double u);
 double drdm(double r, double rho);
 int midPtRKIn(MODEL *model, double Mtot, double R, double rho0, double us, double h, double M_mid, double *pR, double *pRho, double *pU);
 int midPtRKOut(MODEL *model, int bSetModel, double rhoc, double uc, double h, double M_mid, double *pR, double *pRho, double *pU);
-void modelGetNewInitialGuess(double dR, double drhoc, double duc, double ddR, double ddrho, double ddu, double *pDelta);
+void modelGetNewInitialGuess(double dR, double drhoc, double duc, double Y_R, double Y_rho, double Y_u, double dY_R, double dY_rho, double dY_u, double *pDelta);
 void modelSolveToMatchingPoint(MODEL *model, double rhoc, double uc, double M, double R, double rhos, double us, double M_mid, double dm, double *dR, double *drho, double *du);
 void modelSolveSingle(MODEL *model, double Mtot, double rhos, double us);
 # if 0
