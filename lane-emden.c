@@ -46,6 +46,9 @@ MODEL *modelInit(double rhoc, double ucore, double gamma)
     model->w1 = malloc(model->nTableMax*sizeof(double));
     assert(model->w1 != NULL);
 
+    model->mu = malloc(model->nTableMax*sizeof(double));
+    assert(model->mu != NULL);
+
     model->z = malloc(model->nTableMax*sizeof(double));
     assert(model->z != NULL);
 
@@ -93,8 +96,7 @@ double dw2dz(MODEL *model, double z, double w1, double w2)
 {
     if (z > 0)
     {
-//        return(-pow(w1, model->n) - 2.0/z*w2);
-        return(-w1 - 2.0/z*w2);
+        return(-pow(w1, model->n) - 2.0/z*w2);
     } else {
         return(0.0);
     }
@@ -163,7 +165,20 @@ int WriteModeltoFile(MODEL *model, const char *Name)
     for (i=0; i<model->nTable; i++)
     {
 //        fprintf(fp,"%15.7E %15.7E\n", model->z[i], model->w1[i]);
-        fprintf(fp,"%15.7E %15.7E %15.7E %15.7E %15.7E %15.7E %15.7E\n", model->z[i], model->w1[i], model->r[i], model->rho[i], model->M[i], model->u[i], CalcGrav(model->r[i], model->M[i]));
+//        fprintf(fp,"%15.7E %15.7E %15.7E %15.7E %15.7E %15.7E %15.7E %15.7E\n", model->z[i], model->w1[i], model->r[i], model->rho[i], model->M[i], model->u[i], CalcGrav(model->r[i], model->M[i]), model->mu[i]);
+
+
+        fprintf(fp,"%15.7E ", model->z[i]);
+        fprintf(fp,"%15.7E ", model->w1[i]);
+
+        fprintf(fp,"%15.7E ", model->r[i]);
+        fprintf(fp,"%15.7E ", model->rho[i]);
+        fprintf(fp,"%15.7E ", model->M[i]);
+        fprintf(fp,"%15.7E ", model->u[i]);
+
+        fprintf(fp,"%15.7E ", CalcGrav(model->r[i], model->M[i]));
+        fprintf(fp,"%15.7E ", model->mu[i]);
+        fprintf(fp,"\n");
     }
 
     fclose(fp);
@@ -193,6 +208,7 @@ double LESolver(MODEL *model, int bSetModel, double h, double *pR)
     if (bSetModel) {
 		i = 0;
 		model->w1[i] = w1;
+        model->mu[i] = mu;
 		model->z[i] = z;
 
 		model->rho[i] = RhoTheta(model, w1);
@@ -224,11 +240,12 @@ double LESolver(MODEL *model, int bSetModel, double h, double *pR)
         mu += k2mu;
 		z += h;
 		
-        printf("%g %g %g %g %g %g\n", z, w1, w2, sin(z)/z, 1.0/(z*z)*(cos(z)*z-sin(z)), h);
+//        printf("%g %g %g %g %g %g\n", z, w1, w2, sin(z)/z, 1.0/(z*z)*(cos(z)*z-sin(z)), h);
 
         if (bSetModel)
         {
 	        model->w1[i] = w1;
+            model->mu[i] = mu;
             model->z[i] = z;
 
             model->rho[i] = RhoTheta(model, w1);
@@ -259,6 +276,7 @@ double LESolver(MODEL *model, int bSetModel, double h, double *pR)
 		--i;
 
 		model->w1[i] = w1;
+        model->mu[i] = mu;
 		model->z[i] = z;
 
         model->rho[i] = RhoTheta(model, w1);
@@ -288,29 +306,57 @@ void main(int argc, char **argv)
 	double dz, R, M;
 
     /*
-     * Initialise density and internal energy in the core.
+     * Initialize density and internal energy in the core.
      */
     rhoc = 1.0;
     uc = 1.0;
 
+#if 0
     /*
      * Solve a model with n=1 (gamma=2).
      */
+    rhoc = 1.0;
+    uc = 1.0;
     gamma = 2.0;
     dz = M_PI/(nStepsMax-1);
+#endif
 
+    /*
+     * Solve a model with gamma=5/3.
+     */
+    rhoc = 1.0;
+    uc = 1.0;
+    gamma = 5.0/3.0;
+
+    dz = 3*M_PI/(nStepsMax-1);
+#if 0
+    /*
+     * Solve a model with n=2 (gamma=3/2).
+     */
+
+    rhoc = 1.0;
+    uc = 1.0;
+    gamma = 3.0/2.0;
+
+    dz = 3*M_PI/(nStepsMax-1);
+#endif
+
+    /*
+     * Solve the model and print the result to a file.
+     */
     model = modelInit(rhoc, uc, gamma);
 
     fprintf(stderr,"Model initialised.\n");
     fprintf(stderr,"gamma= %g n= %g\n", model->gamma, model->n);
     fprintf(stderr,"\n");
-
+    
     fprintf(stderr,"Solving LE equation: dz= %g\n", dz);
     M = LESolver(model, bSetModel=1, dz, &R);
 
-//    M = LESolver(model, bSetModel=0, dz, &R);
+    fprintf(stderr,"M= %g R= %g mu= %g z= %g\n", M, R, model->mu[model->nTable-1], model->z[model->nTable-1]);
     WriteModeltoFile(model, "model.txt");
-    
+
+
 #if 0
 	/*
 	 * Read command line arguments.

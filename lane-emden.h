@@ -28,6 +28,7 @@ typedef struct model_ctx {
      * Dimensionless variables.
      */
     double *w1;
+    double *mu;
 	double *z;
     /*
      * The physical quantities of the model.
