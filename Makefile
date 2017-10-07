@@ -56,6 +56,24 @@ multi: ballic.multi.o $(tipsy_objects) $(till_objects) $(fortran_objects)
 multi.atm: ballic.multi.atm.o $(tipsy_objects) $(till_objects) $(fortran_objects)
 	cc -o ballic.multi.atm ballic.multi.atm.o $(tipsy_objects) $(till_objects) $(fortran_objects) -lm
 
+#
+# Calculates an equilibrium models for different rhoc and uc.
+#
+solve_model_array: solve_model_array.o $(till_objects)
+	cc -o solve_model_array solve_model_array.o $(till_objects) -lm
+
+#
+# Calculates an equilibrium models for different rhoc and uc.
+#
+solve_model_array_multi: solve_model_array_multi.o $(till_objects)
+	cc -o solve_model_array_multi solve_model_array_multi.o $(till_objects) -lm
+
+#
+# Calculates an equilibrium models for different rhoc and uc (parallel version).
+#
+solve_model_array_multi_omp: solve_model_array_multi.o $(till_objects)
+	cc -o solve_model_array_multi_omp solve_model_array_multi.o $(till_objects) -lm -fopenmp
+
 # Calculates equilibrium models for a given material and different initial densities and internal energies.
 modelsolve: modelsolve.o $(till_objects) nr/gaussj.o
 	cc -o modelsolve modelsolve.o $(till_objects) nr/gaussj.o -lm
@@ -66,6 +84,12 @@ modelsolve: modelsolve.o $(till_objects) nr/gaussj.o
 #
 modelsolve.alibert: modelsolve.alibert.o $(till_objects)
 	cc -o modelsolve.alibert modelsolve.alibert.o $(till_objects) -lm
+
+#
+# Calculates equilibrium models for an ideal gas.
+#
+modelsolve.polytrope: modelsolve.polytrope.o $(till_objects)
+	cc -o modelsolve.polytrope modelsolve.polytrope.o $(till_objects) -lm
 
 #
 # Solves the Lane-Emden equation.

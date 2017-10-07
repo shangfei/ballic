@@ -10,7 +10,7 @@
 #include <malloc.h>
 #include <assert.h>
 #include "tillotson/tillotson.h"
-#include "modelsolve.h"
+#include "solve_model_array.h"
 
 /*
  * Initialize the variables and allocate memory.
@@ -130,7 +130,7 @@ double dMdr(double r,double rho)
  * the results are stored in the look up table. If an error occurs
  * the function returns M < 0.
  */
-double midPtRK(MODEL *model,int bSetModel,double rho,double u,double h,double *pR)
+double midPtRK(MODEL *model,int bSetModel,double rho,double u,double h,double *pR, double *us)
 {
     FILE *fp;
     double M = 0.0;
@@ -229,6 +229,7 @@ double midPtRK(MODEL *model,int bSetModel,double rho,double u,double h,double *p
 		model->dr = h;
 	}
 
+    if (us != NULL) *us = u;
     *pR = r;
     return(M);
 }
@@ -247,7 +248,7 @@ double modelSolve(MODEL *model,double M, double uc) {
 	R = cbrt(3.0*M/(4.0*M_PI*model->tillMat->rho0));
 	dr = R/nStepsMax;
 	a = 1.01*model->tillMat->rho0; /* starts with 1% larger central density */
-	Ma = midPtRK(model,bSetModel=0,a,uc,dr,&R);
+	Ma = midPtRK(model,bSetModel=0,a,uc,dr,&R,NULL);
 	fprintf(stderr,"first Ma:%g R:%g\n",Ma,R);
 	b = a;
 	Mb = 0.5*M;
@@ -257,12 +258,12 @@ double modelSolve(MODEL *model,double M, double uc) {
 		b = a;
 		Mb = Ma;
 		a = 0.5*(model->tillMat->rho0 + a);
-		Ma = midPtRK(model,bSetModel=0,a,uc,dr,&R);
+		Ma = midPtRK(model,bSetModel=0,a,uc,dr,&R,NULL);
 	}
     while (Mb < M)
 	{
 		b = 2.0*b;
-	   	Mb = midPtRK(model,bSetModel=0,b,uc,dr,&R);	
+	   	Mb = midPtRK(model,bSetModel=0,b,uc,dr,&R,NULL);	
 		fprintf(stderr,"first Mb:%g R:%g\n",Mb,R);
 	}
 
@@ -275,7 +276,7 @@ double modelSolve(MODEL *model,double M, double uc) {
     while (Mb-Ma > 1e-10*Mc)
 	{
 		c = 0.5*(a + b);
-		Mc = midPtRK(model,bSetModel=0,c,uc,dr,&R);	
+		Mc = midPtRK(model,bSetModel=0,c,uc,dr,&R,NULL);	
 		if (Mc < M)
 		{
 			a = c;
@@ -291,7 +292,7 @@ double modelSolve(MODEL *model,double M, double uc) {
 	 * Solve it once more setting up the lookup table.
 	 */
 	fprintf(stderr,"rho_core: %g cv: %g uc: %g (in system units)\n",c,model->tillMat->cv,uc);
-	Mc = midPtRK(model,bSetModel=1,c,uc,dr,&R);
+	Mc = midPtRK(model,bSetModel=1,c,uc,dr,&R,NULL);
 	model->R = R;
 	return c;
 }
@@ -305,7 +306,7 @@ void main(int argc, char **argv)
 	double rho, rhomin, rhomax;
 	double u, umin, umax;
 	int nRho, nU;
-	double dr,R, M, mTot;
+	double dr,R, M, mTot, us, u_desired;
 	int iMat;
     FILE *fp;
     int i,j;
@@ -333,6 +334,7 @@ void main(int argc, char **argv)
 	// Hard code all values
 	mTot = 62.366;			// About 1 Earth mass
 	iMat = 0;				// Granite
+    u_desired = 0.4;        // Desired internal energy at the surface
 	rhomin = 1.05*7.33;		// 1.05*rho0
 	rhomax = 3.0*7.33;		// 3.0*rho0
 	umin = 1e-3;
@@ -374,11 +376,15 @@ void main(int argc, char **argv)
 		{
 			u = umin + (umax-umin)/nU*j;
 			// Solve the model for rho, M and u
-			M = midPtRK(model,0,rho,u,dr,&R);
+			M = midPtRK(model,0,rho,u,dr,&R,&us);
 
 //			printf("i=%i j=%i rho=%15.7E u=%15.7E M=%15.7E\n",i,j,rho,u,M);
 //			fprintf(fp,"%15.7E",M);
-			if (M > 0.0 && fabs(M-mTot) < 0.05*mTot)
+#if 0
+            /*
+             * Mark models that agree up to 1% with the desired mass.
+             */
+			if (M > 0.0 && fabs(M-mTot) < 0.01*mTot)
 			{
 				fprintf(fp,"%3i",1);
 			} else if (M < 0.0) {
@@ -386,6 +392,21 @@ void main(int argc, char **argv)
 			} else {
 				fprintf(fp,"%3i",0);
 			}
+#endif
+			if (M > 0.0 && fabs(M-mTot) < 0.01*mTot && fabs(us-u_desired) < 5e-2)
+			{
+				fprintf(fp,"%3i",1);
+			} else if (M < 0.0) {
+				fprintf(fp,"%3i",-1);
+			} else {
+				fprintf(fp,"%3i",0);
+			}
+#if 0
+            /*
+             * Store (M-Mtot)/Mtot.
+             */
+			fprintf(fp,"%15.7E", (M-mTot)/mTot);
+#endif
 		}
 
 		fprintf(fp,"\n");
