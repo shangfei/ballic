@@ -5,7 +5,6 @@
 #define SOLVE_MODEL_ARRAY_MULTI_HINCLUDED
 
 #include "tillotson/tillotson.h"
-#include "nr/nrutil.h"
 
 typedef struct model_ctx {
 	/* Material coefficients from the Tillotson EOS. */
@@ -54,6 +53,9 @@ double dMdr(double r,double rho);
 void modelSolveBC(MODEL *model, double *prho, double *pu, int iMat1, int iMat2);
 //void modelSolveComponent(MODEL *model,int iMat,int bSetModel,int bLastLayer,int *pIndex,double h,double *prho1,double *pu1,double *pM1,double M2,double *pR);
 double modelSolveTwoComponent(MODEL *model,int bSetModel,double rho,double u,double h,double *pR,double *us);
+void modelSolveBCAtmosphere(MODEL *model, TILLMATERIAL *mat, double rho1, double u1, double *rho2, double *u2);
+double modelSolveThreeComponent(MODEL *model,int bSetModel,double rho,double u,double h,double *pR,double *us);
+double **modelMatrixAlloc(int nRow, int nCol);
 void modelWriteToFile(MODEL *model);
 
 #endif // SOLVE_MODEL_ARRAY_MULTI_HINCLUDED

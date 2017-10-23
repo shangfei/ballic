@@ -27,6 +27,8 @@ exe = ballic ballic.single ballic.multi modelsolve
 #defs = -DTILL_PRESS_NP -DTILL_OUTPUT_ALL_WARNINGS -DTILL_PRESS_MELOSH
 
 CFLAGS ?= -O3 -march=native 
+CFLAGS_OMP ?= -O3 -march=native -fopenmp
+
 FFLAGS ?= $(CFLAGS)
 
 objects = $(single_objects)
@@ -72,7 +74,7 @@ solve_model_array_multi: solve_model_array_multi.o $(till_objects)
 # Calculates an equilibrium models for different rhoc and uc (parallel version).
 #
 solve_model_array_multi_omp: solve_model_array_multi.o $(till_objects)
-	cc -o solve_model_array_multi_omp solve_model_array_multi.o $(till_objects) -lm -fopenmp
+	make solve_model_array_multi "CFLAGS=$(CFLAGS_OMP)" 
 
 # Calculates equilibrium models for a given material and different initial densities and internal energies.
 modelsolve: modelsolve.o $(till_objects) nr/gaussj.o

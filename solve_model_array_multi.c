@@ -10,6 +10,11 @@
 
 MODEL *modelInit(double M,double ucore)
 {
+    const double KBOLTZ = 1.38e-16;      /* bolzman constant in cgs */
+    const double MHYDR = 1.67e-24;       /* mass of hydrogen atom in grams */
+    const double MSOLG = 1.99e33;        /* solar mass in grams */
+    const double GCGS = 6.67e-8;         /* G in cgs */
+    const double KPCCM = 3.085678e21;    /* kiloparsec in centimeters */
 	int i;
     /* Initialize the model */
 	MODEL *model;
@@ -21,7 +26,7 @@ MODEL *modelInit(double M,double ucore)
     model->dMsolUnit = 4.80438e-08;
 	
 	/* Hard coded */
-	model->nMat = 5;
+	model->nMat = 6;
 	assert(model->nMat == TILL_N_MATERIAL_MAX);
 
 	model->tillMat = (TILLMATERIAL **) malloc(model->nMat*sizeof(TILLMATERIAL *));
@@ -35,14 +40,14 @@ MODEL *modelInit(double M,double ucore)
 
 	/* Hard coded too */
 	// Earth like planet
-//#if 0
+#if 0
 	model->iMatOrder[0] = IRON;
 	model->iMatOrder[1] = GRANITE;
 //	model->iMatOrder[1] = BASALT;
 	// It might be better so save M in model and use only mass fractions in fM
 	model->fM[0] = 0.3*M;
 	model->fM[1] = 0.7*M;
-//#endif
+#endif
 
 #if 0
 	// Try 10% rocky core and 90% ice mantle
@@ -65,6 +70,18 @@ MODEL *modelInit(double M,double ucore)
 	model->fM[0] = 0.99*M;
 	model->fM[1] = 0.01*M;
 #endif
+
+	// Earth like planet with an atmosphere
+//#if 0
+	model->iMatOrder[0] = IRON;
+	model->iMatOrder[1] = GRANITE;
+	model->iMatOrder[2] = IDEALGAS;
+	// It might be better so save M in model and use only mass fractions in fM
+	model->fM[0] = 0.3*M;
+	model->fM[1] = 0.6*M;
+	model->fM[2] = 0.1*M;
+//#endif
+
 	fprintf(stderr,"Initializing model:\n");
 	fprintf(stderr,"Mtot=%g ucore=%g\n",M,ucore);
 	fprintf(stderr,"iMatOrder[%i, %i]\n",model->iMatOrder[0],model->iMatOrder[1]);
@@ -73,39 +90,53 @@ MODEL *modelInit(double M,double ucore)
 	for (i=0; i<model->nMat; i++)
 	{
 		/*
-		** Initialize one material.
-		** i=0: Granite
-		** i=1: Iron
-		** i=2: Basalt
-		*/
+         * Initialize one material:
+         * 
+         * i=0: Ideal gas
+         * i=1: Granite
+         * i=2: Iron
+         * i=3: Basalt
+         * ...
+         */
 		model->tillMat[i] = tillInitMaterial(i, model->dKpcUnit, model->dMsolUnit, 100, 100, 100.0, 1200.0, 1);
 
 		// Debug information
-
-		fprintf(stderr,"\n");	
-		fprintf(stderr,"Material: %i\n",i);	
-		fprintf(stderr,"a: %g\n", model->tillMat[i]->a);
-		fprintf(stderr,"b: %g\n", model->tillMat[i]->b);
-		fprintf(stderr,"A: %g\n", model->tillMat[i]->A);
-		fprintf(stderr,"B: %g\n", model->tillMat[i]->B);
-		fprintf(stderr,"rho0: %g\n", model->tillMat[i]->rho0);
-		fprintf(stderr,"u0: %g\n", model->tillMat[i]->u0);
-		fprintf(stderr,"us: %g\n", model->tillMat[i]->us);
-		fprintf(stderr,"us2: %g\n", model->tillMat[i]->us2);
-		fprintf(stderr,"alpha: %g\n", model->tillMat[i]->alpha);
-		fprintf(stderr,"beta: %g\n", model->tillMat[i]->beta);
-   		fprintf(stderr,"cv: %g\n", model->tillMat[i]->cv);
-		fprintf(stderr,"\n");
+        if (model->tillMat[i]->iMaterial == IDEALGAS)
+        {
+            fprintf(stderr,"\n");	
+    		fprintf(stderr,"Material: %i\n",i);	
+    		fprintf(stderr,"dConstGamma: %g\n", model->tillMat[i]->dConstGamma);
+    		fprintf(stderr,"dMeanMolMass: %g\n", model->tillMat[i]->dMeanMolMass);
+    		fprintf(stderr,"rho0: %g\n", model->tillMat[i]->rho0);
+    		fprintf(stderr,"cv: %g\n", model->tillMat[i]->cv);
+    		fprintf(stderr,"\n");
+        } else {
+            fprintf(stderr,"\n");	
+    		fprintf(stderr,"Material: %i\n",i);	
+    		fprintf(stderr,"a: %g\n", model->tillMat[i]->a);
+    		fprintf(stderr,"b: %g\n", model->tillMat[i]->b);
+    		fprintf(stderr,"A: %g\n", model->tillMat[i]->A);
+    		fprintf(stderr,"B: %g\n", model->tillMat[i]->B);
+    		fprintf(stderr,"rho0: %g\n", model->tillMat[i]->rho0);
+    		fprintf(stderr,"u0: %g\n", model->tillMat[i]->u0);
+    		fprintf(stderr,"us: %g\n", model->tillMat[i]->us);
+    		fprintf(stderr,"us2: %g\n", model->tillMat[i]->us2);
+    		fprintf(stderr,"alpha: %g\n", model->tillMat[i]->alpha);
+    		fprintf(stderr,"beta: %g\n", model->tillMat[i]->beta);
+    		fprintf(stderr,"cv: %g\n", model->tillMat[i]->cv);
+    		fprintf(stderr,"\n");
+        }
 
 		/* Generate the look up table needed for tillColdULookup(). */
-
-		tillInitLookup(model->tillMat[i]);
+        if (model->tillMat[i]->iMaterial != IDEALGAS) tillInitLookup(model->tillMat[i]);
 	}
 
-    /* model->uFixed = uFixed/model->dErgPerGmUnit; */
+    /*
+     * For an ideal gas tillInitLookup() does not work and screws up cv!.
+     */
     model->uc = ucore;
 
-    model->nTableMax = 10000; 
+    model->nTableMax = 100000; 
     model->M = (double *) malloc(model->nTableMax*sizeof(double));
     assert(model->M != NULL);
     model->rho =(double *)  malloc(model->nTableMax*sizeof(double));
@@ -127,7 +158,7 @@ MODEL *modelInit(double M,double ucore)
 */
 double dudrho(MODEL *model,int iMat,double rho,double u)
 {
-	return(tillPressure(model->tillMat[iMat],rho,u)/(rho*rho));
+	return(eosPressure(model->tillMat[iMat],rho,u)/(rho*rho));
 }
 
 /*
@@ -137,8 +168,8 @@ double drhodr(MODEL *model, int iMat, double r,double rho,double M,double u)
 {
     double dPdrho,dPdu;
 
-	dPdrho=tilldPdrho(model->tillMat[iMat], rho, u); // dP/drho at u=const.
-	dPdu = tilldPdu(model->tillMat[iMat], rho, u);; // dP/du at rho=const.
+	dPdrho = eosdPdrho(model->tillMat[iMat], rho, u); // dP/drho at u=const.
+	dPdu = eosdPdu(model->tillMat[iMat], rho, u);; // dP/du at rho=const.
 
 	/*
 	** drho/dr = -G*M*rho/(dPdrho+dPdu*dudrho)
@@ -397,7 +428,7 @@ double modelSolveTwoComponent(MODEL *model,int bSetModel,double rho,double u,dou
 	iMat = model->iMatOrder[0];
 
     /*
-     * Check, if the given initial copnditions are physical.
+     * Check, if the given initial conditions are physical.
      */
     if (tillIsBelowColdCurve(model->tillMat[iMat], rho, u))
     {
@@ -408,7 +439,6 @@ double modelSolveTwoComponent(MODEL *model,int bSetModel,double rho,double u,dou
     {
         return(-1.0);
     }
-
 
 	if (bSetModel) {
 		model->rho[i] = rho;
@@ -559,6 +589,349 @@ double modelSolveTwoComponent(MODEL *model,int bSetModel,double rho,double u,dou
     *pR = r;
 	return(M);
 }
+
+/*
+ * Calculate the density and internal energy of the atmosphere assuming
+ * P=const and T=const for an ideal gas.
+ */
+void modelSolveBCAtmosphere(MODEL *model, TILLMATERIAL *mat, double rho1, double u1, double *rho2, double *u2)
+{
+    double Ps, Ts, rho_atm, u_atm;
+
+    assert(mat->iMaterial > 0);
+
+    /*
+     * Calculate pressure and temperature at the surface (not including the atmosphere).
+     */
+    Ps = tillPressure(mat, rho1, u1);
+	Ts = tillTempRhoU(mat, rho1, u1);
+
+    assert(model->tillMat[0]->iMaterial == IDEALGAS);
+
+    /*
+     * Use cv and gamma from the ideal gas EOS.
+     */
+    u_atm = Ts*model->tillMat[0]->cv;
+
+//    fprintf(stderr,"iMat= %3i cv= %g.\n", model->tillMat[0]->iMaterial, model->tillMat[0]->cv);
+//    exit(1);
+    rho_atm = Ps/((model->tillMat[0]->dConstGamma-1.0)*u_atm);
+
+    printf("\n");
+    printf("rho= %g u= %g dConstGamma= %g (dConstGamma-1.0)= %g P= %g T= %g\n", rho_atm, u_atm, model->tillMat[0]->dConstGamma, model->tillMat[0]->dConstGamma-1.0, (model->tillMat[0]->dConstGamma-1.0)*rho_atm*u_atm, u_atm/model->tillMat[0]->cv);
+    printf("\n");
+
+    printf("mantle:   rho= %g u= %g P= %g T= %g\n", rho1, u1, Ps, Ts);
+    printf("envelope: rho= %g u= %g P= %g T= %g\n", rho_atm, u_atm, (model->tillMat[0]->dConstGamma-1.0)*rho_atm*u_atm, u_atm/model->tillMat[0]->cv);
+//    exit(1);
+    *rho2 = rho_atm;
+    *u2 = u_atm;
+}
+
+/*
+ * This function integrates the ODEs for a three component model with b.c.
+ *
+ * rho_initial=rho, u_initial=u, M_initial=0
+ *
+ * For the inner layers it integrates until M=M_i (M_i: desired mass of
+ * layer i) and fails if rho < rho0_i. The last layer is solved until rho=rho_s
+ * where rho_s is the desired density at the surface. It returns the total mass
+ * and internal energy at the surface of the model.
+ *
+ * The parameter h sets the stepsize for the RK2 algorithm and for bSetModel=1
+ * the results are saved.
+ */
+double modelSolveThreeComponent(MODEL *model,int bSetModel,double rho,double u,double h,double *pR,double *us)
+{
+//    FILE *fp;
+	// Set inital values for M1 and R
+    double M = 0.0;
+	double r = 0.0;
+    // The cumulative mass of the core
+	double Mc = model->fM[0];
+    // The cumulative mass of the mantle (Mcore+Mmantle)
+	double Mm = Mc + model->fM[1];
+	int iMat;
+    double k1rho,k1M,k1u,k2rho,k2M,k2u,x;
+	int i = 0;
+
+	// (CR) Debug information
+	fprintf(stderr,"\n");
+	fprintf(stderr,"******************************************************************\n");
+	fprintf(stderr,"modelSolveThreeComponent (inital values):\n");
+	fprintf(stderr,"rho: %g, u: %g, M:%g, r:%g rhos:%g\n",rho,u,M,r,model->tillMat[0]->rho0);
+	fprintf(stderr,"bSetModel: %i, h: %g\n",bSetModel,h);
+	fprintf(stderr,"iMat: %i %i %i\n",model->iMatOrder[0],model->iMatOrder[1],model->iMatOrder[2]);
+    fprintf(stderr,"Mc: %g Mm: %g Matm: %g\n",model->fM[0],model->fM[1],model->fM[2]);
+    fprintf(stderr,"******************************************************************\n");
+	fprintf(stderr,"\n");
+
+    /* Set iMat to the material for the core (usually iron). */
+	iMat = model->iMatOrder[0];
+
+    /*
+     * Check, if the given initial conditions are physical.
+     */
+    if (tillIsBelowColdCurve(model->tillMat[iMat], rho, u))
+    {
+        return(-1.0);
+    }
+
+    if (rho <= model->tillMat[iMat]->rho0)
+    {
+        return(-1.0);
+    }
+
+	if (bSetModel) {
+		model->rho[i] = rho;
+		model->M[i] = M;
+		model->u[i] = u;
+		model->r[i] = r;
+		model->mat[i] = iMat;
+		++i;
+	}
+
+	/*
+     * Step 1: Integrate the core until M == Mcore. But at the same time we
+     * have to make sure, that rho >= rho0.
+     */
+	while (M < Mc) {
+		/*
+		** Midpoint Runga-Kutta (2nd order).
+		*/
+		k1rho = h*drhodr(model,iMat,r,rho,M,u);
+		k1M = h*dMdr(r,rho);
+		k1u = h*dudr(model,iMat,r,rho,M,u);
+
+		k2rho = h*drhodr(model,iMat,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
+		k2M = h*dMdr(r+0.5*h,rho+0.5*k1rho);
+		k2u = h*dudr(model,iMat,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
+
+		rho += k2rho;
+		M += k2M;
+		u += k2u;
+		r += h;
+
+        /*
+         * Check, if the initial density is too low, so that the density falls
+         * below rho0 before we reach the desired mass.
+         */
+        if (rho <= model->tillMat[iMat]->rho0 && M < Mc)
+        {
+            return(-1.0);
+        }
+
+//      printf("%15.7E %15.7E %15.7E %15.7E %3i %15.7E\n", r, rho, M, u, iMat, model->tillMat[iMat]->rho0);
+
+		if (bSetModel) {
+			model->rho[i] = rho;
+			model->M[i] = M;
+			model->u[i] = u;
+			model->r[i] = r;
+			model->mat[i] = iMat;
+			++i;
+		}
+	}
+
+	/*
+	** Now do a linear interpolation to M == Mcore.
+	*/
+	x = (Mc - M)/k2M;
+	fprintf(stderr,"M2=%g, M=%g, x=%g\n",Mc,M,x);
+	assert(x <= 0.0);
+	r += h*x;
+	M += k2M*x;
+	rho += k2rho*x;
+	u += k2u*x;
+	fprintf(stderr,"After correction: M2=%g, M=%g, x=%g\n",Mc,M,x);
+
+	if (bSetModel) {
+		--i;
+		model->M[i] = M;
+		model->r[i] = r;
+		model->rho[i] = rho;
+		model->u[i] = u;
+		model->mat[i] = iMat;
+		++i;
+	}
+	
+	fprintf(stderr,"\n");
+	fprintf(stderr,"******************************************************************\n");
+	fprintf(stderr,"modelSolveThreeComponent (core/mantle boundary):\n");
+	fprintf(stderr,"Core: iMat=%i rho=%g u=%g M=%g r=%g P=%g T=%g\n",iMat,rho,u,M,r,tillPressure(model->tillMat[iMat],rho,u),tillTempRhoU(model->tillMat[iMat],rho,u));
+
+	/*
+     * Step 2: Calculate rho and u for the mantle using b.c. T=const and P=const.
+     */
+	tillSolveBC(model->tillMat[model->iMatOrder[0]], model->tillMat[model->iMatOrder[1]], rho, u, &rho, &u);
+
+	iMat = model->iMatOrder[1];
+
+	fprintf(stderr,"Mantle: iMat=%i rho=%g u=%g M=%g r=%g P=%g T=%g\n",iMat,rho,u,M,r,tillPressure(model->tillMat[iMat],rho,u),tillTempRhoU(model->tillMat[iMat],rho,u));
+	fprintf(stderr,"******************************************************************\n");
+	fprintf(stderr,"\n");
+
+    if (tillIsBelowColdCurve(model->tillMat[iMat], rho, u))
+    {
+        return(-1.0);
+    }
+
+	/*
+     * Step 3: Integrate the mantle until M == Mmantle. But at the same time we
+     * have to make sure, that rho >= rho0.
+     */
+	while (M < Mm) {
+		/*
+		** Midpoint Runga-Kutta (2nd order).
+		*/
+		k1rho = h*drhodr(model,iMat,r,rho,M,u);
+		k1M = h*dMdr(r,rho);
+		k1u = h*dudr(model,iMat,r,rho,M,u);
+
+		k2rho = h*drhodr(model,iMat,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
+		k2M = h*dMdr(r+0.5*h,rho+0.5*k1rho);
+		k2u = h*dudr(model,iMat,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
+
+		rho += k2rho;
+		M += k2M;
+		u += k2u;
+		r += h;
+
+        /*
+         * Check, if the initial density is too low, so that the density falls
+         * below rho0 before we reach the desired mass.
+         */
+        if (rho <= model->tillMat[iMat]->rho0 && M < Mm)
+        {
+            return(-1.0);
+        }
+
+//      printf("%15.7E %15.7E %15.7E %15.7E %3i %15.7E\n", r, rho, M, u, iMat, model->tillMat[iMat]->rho0);
+
+		if (bSetModel) {
+			model->rho[i] = rho;
+			model->M[i] = M;
+			model->u[i] = u;
+			model->r[i] = r;
+			model->mat[i] = iMat;
+			++i;
+		}
+	}
+
+	/*
+	** Now do a linear interpolation to M == Mmantle.
+	*/
+	x = (Mm - M)/k2M;
+	fprintf(stderr,"M2=%g, M=%g, x=%g\n",Mm,M,x);
+	assert(x <= 0.0);
+	r += h*x;
+	M += k2M*x;
+	rho += k2rho*x;
+	u += k2u*x;
+	fprintf(stderr,"After correction: M2=%g, M=%g, x=%g\n",Mm,M,x);
+
+	fprintf(stderr,"rho= %g u= %g\n",rho,u);
+	
+    if (bSetModel) {
+		--i;
+		model->M[i] = M;
+		model->r[i] = r;
+		model->rho[i] = rho;
+		model->u[i] = u;
+		model->mat[i] = iMat;
+		++i;
+	}
+
+    /*
+     * Step 4: Calculate rho_atm and u_atm from rho_surface and u_surface.
+     */
+	fprintf(stderr,"\n");
+	fprintf(stderr,"******************************************************************\n");
+	fprintf(stderr,"modelSolveThreeComponent (mantle/atmosphere boundary):\n");
+	fprintf(stderr,"Mantle: iMat=%i rho=%g u=%g M=%g r=%g P=%g T=%g\n",iMat,rho,u,M,r,tillPressure(model->tillMat[iMat],rho,u),tillTempRhoU(model->tillMat[iMat],rho,u));
+
+    modelSolveBCAtmosphere(model, model->tillMat[iMat], rho, u, &rho, &u);
+
+    /*
+     * Set the material for the atmosphere.
+     */
+	iMat = model->iMatOrder[2];
+
+	fprintf(stderr,"Atmosphere: iMat=%i rho=%g u=%g M=%g r=%g P=%g T=%g\n",iMat,rho,u,M,r,eosPressure(model->tillMat[iMat],rho,u),eosTempRhoU(model->tillMat[iMat],rho,u));
+	fprintf(stderr,"******************************************************************\n");
+	fprintf(stderr,"\n");
+
+	/*
+     * Step 5: Integrate the atmosphere until rho(r=R)=rho_s.
+     */
+	while (rho > model->tillMat[model->iMatOrder[2]]->rho0) {
+		/*
+		** Midpoint Runga-Kutta (2nd order).
+		*/
+		k1rho = h*drhodr(model,iMat,r,rho,M,u);
+		k1M = h*dMdr(r,rho);
+		k1u = h*dudr(model,iMat,r,rho,M,u);
+
+		k2rho = h*drhodr(model,iMat,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
+		k2M = h*dMdr(r+0.5*h,rho+0.5*k1rho);
+		k2u = h*dudr(model,iMat,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
+
+		rho += k2rho;
+		M += k2M;
+		u += k2u;
+		r += h;
+
+        /*
+         * Fail, if the mass is more than three times the total desired mass.
+         */
+        if (M > 3.0*(model->fM[0]+model->fM[1]+model->fM[2]))
+        {
+            return(-1.0);
+        }
+
+//      printf("%15.7E %15.7E %15.7E %15.7E %3i %15.7E\n", r, rho, M, u, iMat, model->tillMat[iMat]->rho0);
+//		fprintf(stderr,"r=%g rho=%g M=%g u=%g k1rho=%g k1M=%g k1u=%g k2rho=%g k2M=%g k2u=%g\n",
+//							r, rho, M, u, k1rho, k1M, k1u, k2rho, k2M, k2u);	
+		if (bSetModel) {
+			model->M[i] = M;
+			model->r[i] = r;
+			model->rho[i] = rho;
+			model->u[i] = u;
+			model->mat[i] = iMat;
+			++i;
+			model->nTable = i;
+			model->dr = h;
+		}
+	}
+
+	/*
+	** Now do a linear interpolation to rho == rhos.
+	*/
+	x = (model->tillMat[model->iMatOrder[2]]->rho0 - rho)/k2rho;
+	fprintf(stderr,"iMat=%i, rhos=%g, rho=%g, x=%g\n",iMat,model->tillMat[model->iMatOrder[2]]->rho0,rho,x);
+	fprintf(stderr,"rhos-rho=%g, k2rho=%g\n",model->tillMat[model->iMatOrder[2]]->rho0,k2rho);
+	assert(x <= 0.0);
+	r += h*x;
+	M += k2M*x;
+	rho += k2rho*x;
+	u += k2u*x;
+		
+	if (bSetModel) {
+		--i;
+		model->M[i] = M;
+		model->r[i] = r;
+		model->rho[i] = rho;
+		model->u[i] = u;
+		model->mat[i] = iMat;
+		++i;
+	}	
+
+	// Return values
+    if (us != NULL) *us = u;
+
+    *pR = r;
+	return(M);
+}
 /*
  * Write the lookup table to ballic.model.
  */ 
@@ -567,15 +940,20 @@ void modelWriteToFile(MODEL *model)
 	FILE *fp;
 	int i;
 
-	fp = fopen("ballic.model","w");
+    fprintf(stderr, "nTable= %i nTableMax= %i\n", model->nTable, model->nTableMax);
+	fp = fopen("ballic.model", "w");
 	assert(fp != NULL);
-	
+
+    assert(model->nTable <= model->nTableMax);
+
 	fprintf(fp,"#R  rho  M  u  mat tillPressure  tillTempRhoU\n");
-	for (i=0; i<model->nTable;i++)
+	for (i=0; i<model->nTable; i++)
 	{
+        printf("%i\n", i);
 		fprintf(fp,"%g %g %g %g %i %g %g\n",model->r[i],model->rho[i],model->M[i],model->u[i],model->mat[i],
-			tillPressure(model->tillMat[model->mat[i]], model->rho[i], model->u[i]),
-			tillTempRhoU(model->tillMat[model->mat[i]], model->rho[i], model->u[i]));
+			eosPressure(model->tillMat[model->mat[i]], model->rho[i], model->u[i]),
+			eosTempRhoU(model->tillMat[model->mat[i]], model->rho[i], model->u[i]));
+//		fprintf(fp,"%15.7E %15.7E %15.7E %15.7E %i\n",model->r[i],model->rho[i],model->M[i],model->u[i],model->mat[i]);
 	}
 	fclose(fp);
 }
@@ -602,6 +980,25 @@ double **modelMatrixAlloc(int nRow, int nCol)
 	return (matrix);
 }
 
+int modelWriteArrayToFile(FILE *fp,double **array, int nRho, int nU)
+{
+    int i, j;
+
+    assert(fp != NULL);
+
+	for (i=0; i<nRho; i++)
+	{
+		for (j=0; j<nU; j++)
+		{
+            fprintf(fp, "%15.7E", array[i][j]);
+		}
+
+		fprintf(fp,"\n");
+	}
+
+    return(0);
+}
+
 /*
  * Build an array of models for different initial rhoc and uc and mark those,
  * that have the proper mass and surface temperature.
@@ -614,7 +1011,7 @@ void main(int argc, char **argv) {
 	double u, umin, umax;
 	int nRho, nU;
 	double dr,R, M, mTot, us, u_desired;
-    double **M_array;
+    double **M_array, **rhoc_array, **uc_array, **us_array;
 	int nLayer, nThreads;
     FILE *fp;
     int i,j;
@@ -632,16 +1029,37 @@ void main(int argc, char **argv) {
 	umin = 0.0;
 	umax = 100.0;			// umax > us2
 
+#if 0
+    /*
+     * Zoom in for the two component models.
+     */
+	rhomin = 21.0;
+    rhomax = 54.0;
+	umin = 0.0;
+	umax = 25.0;
+#endif
+//#if 0
+    /*
+     * Zoom in for the three component models.
+     */
+	rhomin = 30.0;
+    rhomax = 50.0;
+	umin = 5.0;
+	umax = 25.0;
+//#endif
 	// Do a nRho x nU grid
 	nRho = 1000;
 	nU = 1000;
 
     M_array = modelMatrixAlloc(nRho, nU);
+    rhoc_array = modelMatrixAlloc(nRho, nU);
+    uc_array = modelMatrixAlloc(nRho, nU);
+    us_array = modelMatrixAlloc(nRho, nU);
 
     // Initialize model (M and uc are not used!)
 	model = modelInit(mTot, 0.0);
 
-    nLayer = 2;
+    nLayer = 3;
 
 	// Open output file
     fp = fopen("solve_model_array_multi.txt","w");
@@ -651,9 +1069,10 @@ void main(int argc, char **argv) {
 	/*
 	 * First estimate the maximum possible radius.
 	 */
-	R = cbrt(3.0*M/(4.0*M_PI*model->tillMat[nLayer-1]->rho0));
-	dr = R/nStepsMax;
-	fprintf(stderr,"First guess: R= %g dr= %g\n", R, dr);
+//	R = cbrt(3.0*M/(4.0*M_PI*model->tillMat[nLayer-1]->rho0));
+	R = cbrt(3.0*M/(4.0*M_PI*model->tillMat[model->iMatOrder[nLayer-2]]->rho0));
+    dr = R/nStepsMax;
+	fprintf(stderr,"First guess: R= %g dr= %g iMat= %i\n", R, dr, model->iMatOrder[nLayer-2]);
 
 #if 0
 	/*
@@ -664,9 +1083,32 @@ void main(int argc, char **argv) {
 	M = midPtRK(model,1,rho,u,dr,&R);
 #endif
 
+//#if 0
+//M = modelSolveThreeComponent(model, 0, 60.0, 80.0, dr, &R, &us);
+//M = modelSolveThreeComponent(model, 0, 31.23, 8.25, dr, &R, &us);
+//M = modelSolveThreeComponent(model, 0, 27.27, 22.75, dr, &R, &us);
+//  35   9   3.9764500E+01   9.0000000E+00   6.5255092E+01   2.4232745E-01
+//    M = modelSolveThreeComponent(model, 1, 3.9764500E+01, 9.0000000E+00, dr, &R, &us);
+    /*
+     * Model with M=62.366 and three components:
+     * Core:     Iron
+     * Mantle:   Granite
+     * Envelope: Ideal gas
+     *
+     * 589 176   4.1780000E+01   8.5200000E+00   6.2366582E+01   6.8733496E-02
+     */
+    M = modelSolveThreeComponent(model, 1, 4.1780000E+01, 8.5200000E+00, dr, &R, &us);
+    fprintf(stderr, "Writing model to file...\n");
+    modelWriteToFile(model);
+    exit(1);
+//#endif
+
 #ifdef _OPENMP
     fprintf(stderr,"Code was compiled with OpenMP.\n");
 //    omp_set_num_threads(16);
+#else
+    fprintf(stderr,"Code was compiled for single core.\n");
+//    assert(0);
 #endif
 
     /*
@@ -678,7 +1120,11 @@ void main(int argc, char **argv) {
 #ifdef _OPENMP
     nThreads = omp_get_num_threads();
     fprintf(stderr, "nThreads= %i.\n", nThreads);
+#else
+    fprintf(stderr, "Not compiled with OpenMP.\n");
 #endif
+
+
 #pragma omp for private(i, j, rho, u, M, R, us, nThreads)
     for (i=0; i<nRho; i++)
 	{
@@ -687,8 +1133,15 @@ void main(int argc, char **argv) {
 		for (j=0; j<nU; j++)
 		{
 			u = umin + (umax-umin)/nU*j;
+            rhoc_array[i][j] = rho;
+            uc_array[i][j] = u;
+            us = 0.0;
+
 			// Solve the model for rho, M and u
-            M = modelSolveTwoComponent(model, 0, rho, u, dr, &R, &us);
+//            M = modelSolveTwoComponent(model, 0, rho, u, dr, &R, &us);
+            M = modelSolveThreeComponent(model, 0, rho, u, dr, &R, &us);
+            us_array[i][j] = us;
+
 //            printf("i= %i j= %i M= %g\n", i, j, M);
             M_array[i][j] = M;
         }
@@ -696,6 +1149,7 @@ void main(int argc, char **argv) {
 }
     fprintf(stderr, "All models solved.\n");
 
+    printf("#  i   j            rhoc              uc               M              us\n");
     /*
      * Print the results.
      */
@@ -717,9 +1171,13 @@ void main(int argc, char **argv) {
 			}
 #endif
 //#if 0
-			if (M_array[i][j] > 0.0 && fabs(M_array[i][j]-mTot) < 0.01*mTot && fabs(us-u_desired) < 5e-0)
-			{
+//			if (M_array[i][j] > 0.0 && fabs(M_array[i][j]-mTot) < 0.01*mTot && fabs(us_array[i][j]-u_desired) < 1e-1)
+
+			if (M_array[i][j] > 0.0 && fabs(M_array[i][j]-mTot) < 0.001*mTot)
+            {
 				fprintf(fp,"%3i",1);
+//                printf("i= %i j= %i: rhoc= %15.7E uc= %15.7E M= %15.7E us= %15.7E\n", i, j, rhoc_array[i][j], uc_array[i][j], M, us_array[i][j]);
+                printf(" %3i %3i %15.7E %15.7E %15.7E %15.7E\n", i, j, rhoc_array[i][j], uc_array[i][j], M_array[i][j], us_array[i][j]);
 			} else if (M_array[i][j] < 0.0) {
 				fprintf(fp,"%3i",-1);
 			} else {
@@ -737,4 +1195,23 @@ void main(int argc, char **argv) {
 		fprintf(fp,"\n");
 	}
 	fclose(fp);
+
+    /*
+     * Write the density and internal energy to a file too.
+     */
+    fp = fopen("solve_model_array_multi.rhoc","w");
+    modelWriteArrayToFile(fp, rhoc_array,  nRho, nU);
+    fclose(fp);
+
+    fp = fopen("solve_model_array_multi.uc","w");
+    modelWriteArrayToFile(fp, uc_array,  nRho, nU);
+    fclose(fp);
+
+    fp = fopen("solve_model_array_multi.us","w");
+    modelWriteArrayToFile(fp, us_array,  nRho, nU);
+    fclose(fp);
+
+    fp = fopen("solve_model_array_multi.mass","w");
+    modelWriteArrayToFile(fp, M_array,  nRho, nU);
+    fclose(fp);
 }
