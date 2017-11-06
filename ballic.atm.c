@@ -3,11 +3,23 @@
 #include <stdlib.h>
 #include <malloc.h>
 #include <assert.h>
-#include "ballic.h"
 #include "tipsy.h"
 #include "tillotson/tillotson.h"
+//#include "ballic.h"
 
-/* Functions for Icosahedron. */
+#define max(A,B) ((A) > (B) ? (A) : (B))
+#define min(A,B) ((A) > (B) ? (B) : (A))
+
+// Isentropic thermal profile
+#define BALLIC_U_ISENTROPIC
+
+#define MATERIAL 0
+
+typedef struct icosa_struct {
+    float R[180];
+    float v[36];
+    } ICOSA;
+
 ICOSA *icosaInit(void) {
     ICOSA *ctx;
     ctx = malloc(sizeof(ICOSA));
@@ -24,6 +36,7 @@ void icosaPix2Vec(ICOSA *ctx,int i,int resolution,double *vec) {
     vec[1] = v[1];
     vec[2] = v[2];
     }
+
 
 /* -----------------------------------------------------------------------------
  *
@@ -126,6 +139,89 @@ void pix2vec_ring( long nside, long ipix, double *vec) {
   
 }
 
+double Packed49[49][3] = {
+    {1.0820379E-008,-3.2300459E-006,    0.7790824},
+    { 0.0851419,      -0.0604194,       0.3497294},
+    {-0.0914288,       0.4137149,       0.6537967},
+    {-0.4233704,      -0.0167043,       0.6537949},
+    { 0.4161716,       0.0795128,       0.6537953},
+    { 0.2606476,      -0.3340458,       0.6537932},
+    {-0.1783143,      -0.3843534,       0.6537934},
+    { 0.3214161,       0.4881783,       0.5151146},
+    {-0.4918671,       0.3793286,       0.4702615},
+    {-0.0929470,       0.3254455,       0.2208710},
+    {-0.5385916,      -0.3977282,       0.3983726},
+    { 0.6544342,      -0.1767253,       0.3839966},
+    {-0.0464433,      -0.6884808,       0.3616719},
+    { 0.6543453 ,      0.2637903 ,      0.3304789},
+    { 0.3839234,      -0.5971428,       0.3209247},
+    {-0.7108776,       0.0012718,       0.3187802},
+    {-0.1876019,      -0.3352532,       0.1368439},
+    { 0.0704146,       0.7351211,       0.2481284},
+    {-0.3638534,       0.6695231,       0.1622308},
+    { 0.3033485,       0.2022102,       0.0692749},
+    { 0.4742969,       0.6067250,       0.1178835},
+    {-0.6795831,       0.3744220,       0.0703152},
+    {-0.3794767,       0.0482692,       0.0303653},
+    { 0.6538247,      -0.4232979,       0.0173632},
+    { 0.2332925,      -0.2885923,       0.0015460},
+    { 0.7790813, -5.7994478E-013,      -0.0012951},
+    {-0.5429419,      -0.5585797,      -0.0131201},
+    {-0.1452212,      -0.7628716,      -0.0625065},
+    {-0.7541588,      -0.1768841,      -0.0832219},
+    { 0.2928920,      -0.7156702,      -0.0948672},
+    {-0.0815266,       0.7567586,      -0.1662504},
+    { 0.6534047,       0.3539813,      -0.2339385},
+    {-0.4662671,       0.5642231,      -0.2668646},
+    { 0.3250845,       0.6429856,      -0.2964101},
+    {-0.6822678,       0.1837015,      -0.3282282},
+    { 0.4930282,      -0.4578927,      -0.3927173},
+    {-0.3428409,      -0.5690840,      -0.4069064},
+    { 0.6530941,      -0.0471244,      -0.4221572},
+    {-0.1036092,       0.2867325,      -0.2191358},
+    { 0.0858176,      -0.5795982,      -0.5134887},
+    {-0.5513357,      -0.1947856,      -0.5148367},
+    { 0.0032634,       0.5253046,      -0.5753380},
+    {-0.1660916,      -0.1851457,      -0.2781839},
+    { 0.3945018,       0.3205518,      -0.5904102},
+    {-0.3693146,       0.2921726,      -0.6206539},
+    { 0.2268184,       0.0121013,      -0.3221586},
+    { 0.2750635,      -0.2203113,      -0.6948182},
+    {-0.1633231,      -0.2729136,      -0.7112054},
+    { 0.0133638,       0.1279994,      -0.7683794}
+    };
+
+
+typedef struct model_ctx {
+	/* Material coefficients from the Tillotson EOS. */
+	TILLMATERIAL **tillMat;
+	int nMat;
+	int *iMatOrder;	// Here we store in which order the materials are
+	double *fM;		// Masses of each layer
+
+	/*
+	** Some unit conversion factors.
+	*/
+	double dKpcUnit;
+	double dMsolUnit;
+
+	/*
+	** The lookup table for the equilibrium model.
+	*/
+	int nTableMax;
+	int nTable;
+	double uc; /* u at r = 0 */
+	double *M;
+	double *rho;
+	double *u;
+	double *r;
+	int *mat;
+
+	double dr;
+	double R;
+	} MODEL;
+
+
 MODEL *modelInit(double M,double ucore) {
 	int i;
     /* Initialize the model */
@@ -137,86 +233,118 @@ MODEL *modelInit(double M,double ucore) {
     model->dKpcUnit = 2.06701e-13;
     model->dMsolUnit = 4.80438e-08;
 	
-	/* Hard coded for the moment */
-	model->nLayer = 2;
-	assert(model->nLayer <= TILL_N_MATERIAL_MAX);
+	/* Hard coded */
+	model->nMat = 6;
+	assert(model->nMat == TILL_N_MATERIAL_MAX);
 
-	model->tillMat = malloc(model->nLayer*sizeof(TILLMATERIAL *));
+	model->tillMat = (TILLMATERIAL **) malloc(model->nMat*sizeof(TILLMATERIAL *));
 	assert(model->tillMat != NULL);
 	
-	model->iLayer = malloc(model->nLayer*sizeof(int));
-	assert(model->iLayer != NULL);
+	model->iMatOrder = (int *) malloc(model->nMat*sizeof(int));
+	assert(model->iMatOrder != NULL);
 	
-	model->MLayer = malloc(model->nLayer*sizeof(double));
-	assert(model->MLayer != NULL);
+	model->fM = (double *) malloc(model->nMat*sizeof(double));
+	assert(model->fM != NULL);
 
 	/* Hard coded too */
-	model->iLayer[0] = IRON;
-	model->iLayer[1] = GRANITE;
-//	model->iLayer[1] = BASALT;
-	// It might be better so save M in model and use only mass fractions in MLayer
-	model->MLayer[0] = 0.3*M;
-	model->MLayer[1] = 0.7*M;
-
+	// Earth like planet
 #if 0
-	/* Debugging ice. */
-	model->iLayer[0] = GRANITE;
-	model->iLayer[1] = ICE;
-	model->MLayer[0] = 0.25*M;
-	model->MLayer[1] = 0.75*M;
+	model->iMatOrder[0] = IRON;
+	model->iMatOrder[1] = GRANITE;
+//	model->iMatOrder[1] = BASALT;
+	// It might be better so save M in model and use only mass fractions in fM
+	model->fM[0] = 0.3*M;
+	model->fM[1] = 0.7*M;
 #endif
 
 #if 0
-	/* Single component model. */
-	model->iLayer[0] = GRANITE;
-	model->MLayer[0] = 1.0*M;
+	// Try 10% rocky core and 90% ice mantle
+	model->iMatOrder[0] = GRANITE;
+	model->iMatOrder[1] = ICE;
+	model->fM[0] = 0.1*M;
+	model->fM[1] = 0.9*M;
 #endif
+#if 0
+	// Try 50% rocky core and 50% ice mantle
+	model->iMatOrder[0] = GRANITE;
+	model->iMatOrder[1] = ICE;
+	model->fM[0] = 0.5*M;
+	model->fM[1] = 0.5*M;
+#endif
+#if 0
+	// Try 99% rocky core and 1% water ocean
+	model->iMatOrder[0] = GRANITE;
+	model->iMatOrder[1] = WATER;
+	model->fM[0] = 0.99*M;
+	model->fM[1] = 0.01*M;
+#endif
+
+	// Earth like planet with an atmosphere
+//#if 0
+	model->iMatOrder[0] = IRON;
+	model->iMatOrder[1] = GRANITE;
+	model->iMatOrder[2] = IDEALGAS;
+	// It might be better so save M in model and use only mass fractions in fM
+	model->fM[0] = 0.3*M;
+	model->fM[1] = 0.6*M;
+	model->fM[2] = 0.1*M;
+//#endif
+
 	fprintf(stderr,"Initializing model:\n");
 	fprintf(stderr,"Mtot=%g ucore=%g\n",M,ucore);
+	fprintf(stderr,"iMatOrder[%i, %i]\n",model->iMatOrder[0],model->iMatOrder[1]);
+	fprintf(stderr,"fM[%g, %g]\n",model->fM[0],model->fM[1]);
 
-	fprintf(stderr,"iLayer[ ");
-	for (i=0; i<model->nLayer; i++)
-		fprintf(stderr,"%i ",model->iLayer[i]);
-	fprintf(stderr,"]\n");
-
-	fprintf(stderr,"MLayer[ ");
-	for (i=0; i<model->nLayer; i++)
-		fprintf(stderr,"%g ",model->MLayer[i]);
-	fprintf(stderr,"]\n");
-
-	for (i=0; i<model->nLayer; i++)
+	for (i=0; i<model->nMat; i++)
 	{
 		/*
-		** Initialize one material.
-		*/
-		model->tillMat[i] = tillInitMaterial(model->iLayer[i], model->dKpcUnit, model->dMsolUnit, 100, 100, 50.0, 50.0, 1);
+         * Initialize one material:
+         * 
+         * i=0: Ideal gas
+         * i=1: Granite
+         * i=2: Iron
+         * i=3: Basalt
+         * ...
+         */
+		model->tillMat[i] = tillInitMaterial(i, model->dKpcUnit, model->dMsolUnit, 100, 100, 100.0, 1200.0, 1);
 
 		// Debug information
-
-		fprintf(stderr,"\n");	
-		fprintf(stderr,"Material: %i\n",model->iLayer[i]);	
-		fprintf(stderr,"a: %g\n", model->tillMat[i]->a);
-		fprintf(stderr,"b: %g\n", model->tillMat[i]->b);
-		fprintf(stderr,"A: %g\n", model->tillMat[i]->A);
-		fprintf(stderr,"B: %g\n", model->tillMat[i]->B);
-		fprintf(stderr,"rho0: %g\n", model->tillMat[i]->rho0);
-		fprintf(stderr,"u0: %g\n", model->tillMat[i]->u0);
-		fprintf(stderr,"us: %g\n", model->tillMat[i]->us);
-		fprintf(stderr,"us2: %g\n", model->tillMat[i]->us2);
-		fprintf(stderr,"alpha: %g\n", model->tillMat[i]->alpha);
-		fprintf(stderr,"beta: %g\n", model->tillMat[i]->beta);
-   		fprintf(stderr,"cv: %g\n", model->tillMat[i]->cv);
-		fprintf(stderr,"\n");
+        if (model->tillMat[i]->iMaterial == IDEALGAS)
+        {
+            fprintf(stderr,"\n");	
+    		fprintf(stderr,"Material: %i\n",i);	
+    		fprintf(stderr,"dConstGamma: %g\n", model->tillMat[i]->dConstGamma);
+    		fprintf(stderr,"dMeanMolMass: %g\n", model->tillMat[i]->dMeanMolMass);
+    		fprintf(stderr,"rho0: %g\n", model->tillMat[i]->rho0);
+    		fprintf(stderr,"cv: %g\n", model->tillMat[i]->cv);
+    		fprintf(stderr,"\n");
+        } else {
+            fprintf(stderr,"\n");	
+    		fprintf(stderr,"Material: %i\n",i);	
+    		fprintf(stderr,"a: %g\n", model->tillMat[i]->a);
+    		fprintf(stderr,"b: %g\n", model->tillMat[i]->b);
+    		fprintf(stderr,"A: %g\n", model->tillMat[i]->A);
+    		fprintf(stderr,"B: %g\n", model->tillMat[i]->B);
+    		fprintf(stderr,"rho0: %g\n", model->tillMat[i]->rho0);
+    		fprintf(stderr,"u0: %g\n", model->tillMat[i]->u0);
+    		fprintf(stderr,"us: %g\n", model->tillMat[i]->us);
+    		fprintf(stderr,"us2: %g\n", model->tillMat[i]->us2);
+    		fprintf(stderr,"alpha: %g\n", model->tillMat[i]->alpha);
+    		fprintf(stderr,"beta: %g\n", model->tillMat[i]->beta);
+    		fprintf(stderr,"cv: %g\n", model->tillMat[i]->cv);
+    		fprintf(stderr,"\n");
+        }
 
 		/* Generate the look up table needed for tillColdULookup(). */
-		tillInitLookup(model->tillMat[i]);
+        if (model->tillMat[i]->iMaterial != IDEALGAS) tillInitLookup(model->tillMat[i]);
 	}
 
-
-    /* model->uFixed = uFixed/model->dErgPerGmUnit; */
+    /*
+     * For an ideal gas tillInitLookup() does not work and screws up cv!.
+     */
     model->uc = ucore;
 
-    model->nTableMax = 10000; 
+    model->nTableMax = 100000; 
     model->M = malloc(model->nTableMax*sizeof(double));
     assert(model->M != NULL);
     model->rho = malloc(model->nTableMax*sizeof(double));
@@ -233,27 +361,26 @@ MODEL *modelInit(double M,double ucore) {
 	return(model);
     }
 
+double drhodr(MODEL *model,int iMat,double r,double rho,double M,double u);
+double dudr(MODEL *model,int iMat,double r,double rho,double M,double u);
+
 /*
-** dudrho depends on the internal energy profile that we choose!
-*/
-double dudrho(MODEL *model,int iLayer,double rho,double u) {
-	/*
-	** We assume an isentropic internal energy profile!
-	*/
-	return(tillPressure(model->tillMat[iLayer],rho,u)/(rho*rho));
+ * dudrho depends on the internal energy profile that we choose!
+ */
+double dudrho(MODEL *model,int iMat,double rho,double u)
+{
+	return(eosPressure(model->tillMat[iMat],rho,u)/(rho*rho));
 }
 
 /*
-** Calculate dudrho to solve for the equilibrium model.
-*/
-double drhodr(MODEL *model, int iLayer, double r,double rho,double M,double u) {
+ * Calculate dudrho to solve for the equilibrium model.
+ */
+double drhodr(MODEL *model, int iMat, double r,double rho,double M,double u)
+{
     double dPdrho,dPdu;
 
-	dPdrho=tilldPdrho(model->tillMat[iLayer], rho, u); // dP/drho at u=const.
-	dPdu = tilldPdu(model->tillMat[iLayer], rho, u);; // dP/du at rho=const.
-
-	// (CR) Debug
-//	fprintf(stderr,"dPdrho:%g, dPdu:%g,dudrho:%g\n",dPdrho,dPdu,dudrho(model,iLayer,rho,u));
+	dPdrho = eosdPdrho(model->tillMat[iMat], rho, u); // dP/drho at u=const.
+	dPdu = eosdPdu(model->tillMat[iMat], rho, u);; // dP/du at rho=const.
 
 	/*
 	** drho/dr = -G*M*rho/(dPdrho+dPdu*dudrho)
@@ -261,20 +388,21 @@ double drhodr(MODEL *model, int iLayer, double r,double rho,double M,double u) {
 	assert(r >= 0.0);
 	if (r > 0.0) {
 		// We assume G=1
-		return(-M*rho/(r*r*(dPdrho + dPdu*dudrho(model,iLayer,rho,u))));
+		return(-M*rho/(r*r*(dPdrho + dPdu*dudrho(model,iMat,rho,u))));
 	}
 	else {
 		return(0.0);
 	}
 }
 
-double dudr(MODEL *model,int iLayer,double r,double rho,double M,double u) {
-  return(dudrho(model,iLayer,rho,u)*drhodr(model,iLayer,r,rho,M,u));
+double dudr(MODEL *model,int iMat,double r,double rho,double M,double u)
+{
+  return(dudrho(model,iMat,rho,u)*drhodr(model,iMat,r,rho,M,u));
 }
 
 /*
-** This derivative is independent of the model and only involves geometry.
-*/
+ * This derivative is independent of the model and only involves geometry.
+ */
 double dMdr(double r,double rho) {
 	assert(r >= 0.0);
 	return(4.0*M_PI*r*r*rho);
@@ -283,40 +411,38 @@ double dMdr(double r,double rho) {
 /*
 ** Solve for rho2 and u2 using the b.c. P1=P2 and T1=T2.
 */
-void modelSolveBC(MODEL *model, double *prho, double *pu, int iLayer1, int iLayer2) {
+void modelSolveBC(MODEL *model, double *prho, double *pu, int iMat1, int iMat2) {
 	double P1, T1, P2, T2;
     double rho1,u1,rho2,u2;
     double rhoa,ua,rhob,ub;
 
 	assert(prho != NULL);
 	assert(pu != NULL);
-	
-	// Make sure that (rho,u) is not below the cold curve (not implemented yet!)
-	
+
 	rho1 = *prho;
 	u1 = *pu;
 
-	P1 = tillPressure(model->tillMat[model->iLayer[iLayer1]], rho1, u1);
-	T1 = tillTempRhoU(model->tillMat[model->iLayer[iLayer1]], rho1, u1);
+	P1 = tillPressure(model->tillMat[iMat1], rho1, u1);
+	T1 = tillTempRhoU(model->tillMat[iMat1], rho1, u1);
 
 	/*
 	** We use rho1 as an upper limit for rho2 assuming that the denser component is in the inner shell.
 	*/
 	rhoa = rho1;
-	ua = tillURhoTemp(model->tillMat[model->iLayer[iLayer2]],rhoa,T1);
+	ua = tillURhoTemp(model->tillMat[iMat2],rhoa,T1);
 
 	rhob = 0.0;
-	ub = tillURhoTemp(model->tillMat[model->iLayer[iLayer2]],rhob,T1);
+	ub = tillURhoTemp(model->tillMat[iMat2],rhob,T1);
 
 	fprintf(stderr,"\n");
 	fprintf(stderr,"*****************************************************************\n");
 	fprintf(stderr,"modelSolveBC:\n");
-	fprintf(stderr,"iLayer1=%i (iMat=%i) iLayer2=%i (iMat=%i)\n",iLayer1,model->iLayer[iLayer1],iLayer2,model->iLayer[iLayer2]);
+	fprintf(stderr,"iMat1=%i iMat2=%i\n",iMat1,iMat2);
 	fprintf(stderr,"rho1=%g u1=%g P1=%g T1=%g\n",rho1,u1,P1,T1);
-	fprintf(stderr,"rhoa=%g ua=%g Pa=%g Ta=%g\n",rhoa,ua,tillPressure(model->tillMat[model->iLayer[iLayer2]], rhoa, ua),tillTempRhoU(model->tillMat[model->iLayer[iLayer2]], rhoa, ua));
-   	fprintf(stderr,"rhob=%g ub=%g Pb=%g Tb=%g\n",rhob,ub,tillPressure(model->tillMat[model->iLayer[iLayer2]], rhob, ub),tillTempRhoU(model->tillMat[model->iLayer[iLayer2]], rhob, ub));
+	fprintf(stderr,"rhoa=%g ua=%g Pa=%g Ta=%g\n",rhoa,ua,tillPressure(model->tillMat[iMat2], rhoa, ua),tillTempRhoU(model->tillMat[iMat2], rhoa, ua));
+   	fprintf(stderr,"rhob=%g ub=%g Pb=%g Tb=%g\n",rhob,ub,tillPressure(model->tillMat[iMat2], rhob, ub),tillTempRhoU(model->tillMat[iMat2], rhob, ub));
 	
-	tillSolveBC(model->tillMat[model->iLayer[iLayer1]],model->tillMat[model->iLayer[iLayer2]],rho1,u1,&rho2,&u2);
+	tillSolveBC(model->tillMat[iMat1],model->tillMat[iMat2],rho1,u1,&rho2,&u2);
 	fprintf(stderr,"modelSolveBC: rho1: %g, u1: %g, rho2:%g, u2:%g\n",rho1,u1,rho2,u2);
 	fprintf(stderr,"*****************************************************************\n");
 	fprintf(stderr,"\n");
@@ -326,158 +452,7 @@ void modelSolveBC(MODEL *model, double *prho, double *pu, int iLayer1, int iLaye
 	*/
 	*prho = rho2;
 	*pu = u2; 
-}
-
-/*
-** This function integrates the ODEs with b.c. rho_initial=rho1, u_initial=u1
-** and M_initial=M1 until M=M2. The final values for rho and u are returned
-** (so the original value will be overwritten!!). The parameter h sets the
-** stepsize for the RK2 algorithm and for bSetModel=1 the results are saved
-** in the lookup table (starting from index pIndex). If bLastLayer=1 then
-** the algorithm enforces rho(r=R)=rho0.
-*/
-void modelSolveComponent(MODEL *model,int iLayer,int bSetModel,int bLastLayer,int *pIndex,double h,double *prho1,double *pu1,double *pM1,double M2,double *pR)
-{
-    FILE *fp;
-	// Set inital values rho1, u1, M1
-	double rho=*prho1;
-	double u = *pu1;
-    double M = *pM1;
-	double r = *pR;
-
-    double k1rho,k1M,k1u,k2rho,k2M,k2u,x;
-
-	// (CR) Debug information
-	fprintf(stderr,"\n");
-	fprintf(stderr,"******************************************************************\n");
-	fprintf(stderr,"modelSolveComponent (inital values):\n");
-	fprintf(stderr,"iLayer: %i (iMat: %i), Index: %i, h: %g\n",iLayer,model->iLayer[iLayer],*pIndex,h);
-	fprintf(stderr,"rho: %g, u: %g, M:%g, r:%g\n",rho,u,M,r);
-	fprintf(stderr,"bSetModel: %i, bLastLayer: %i\n",bSetModel,bLastLayer);
-	fprintf(stderr,"******************************************************************\n");
-	fprintf(stderr,"\n");
-
-	if (bSetModel) {
-		model->rho[*pIndex] = rho;
-		model->M[*pIndex] = M;
-		model->u[*pIndex] = u;
-		model->r[*pIndex] = r;
-		model->mat[*pIndex] = model->iLayer[iLayer];
-		++*pIndex;
-	}
-
-	if (bLastLayer != 1)
-	{
-		/* Integrate from M1 to M2 for the inner layers. */
-		while (M < M2) {
-			/*
-			** Midpoint Runga-Kutta (2nd order).
-			*/
-			k1rho = h*drhodr(model,iLayer,r,rho,M,u);
-			k1M = h*dMdr(r,rho);
-			k1u = h*dudr(model,iLayer,r,rho,M,u);
-
-			k2rho = h*drhodr(model,iLayer,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
-			k2M = h*dMdr(r+0.5*h,rho+0.5*k1rho);
-			k2u = h*dudr(model,iLayer,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
-
-			rho += k2rho;
-			M += k2M;
-			u += k2u;
-			r += h;
-		
-			if (bSetModel) {
-				model->rho[*pIndex] = rho;
-				model->M[*pIndex] = M;
-				model->u[*pIndex] = u;
-				model->r[*pIndex] = r;
-				model->mat[*pIndex] = model->iLayer[iLayer];
-	//			fprintf(fp,"%g %g %g %g\n",r,rho,M,u);
-				++*pIndex;
-		    }
-		}
-
-		/*
-		** Now do a linear interpolation to M == M2.
-		*/
-		x = (M2 - M)/k2M;
-		fprintf(stderr,"M2=%g, M=%g, x=%g\n",M2,M,x);
-		assert(x <= 0.0);
-		r += h*x;
-		M += k2M*x;
-		rho += k2rho*x;
-		u += k2u*x;
-
-		if (bSetModel) {
-			--*pIndex;
-			model->M[*pIndex] = M;
-			model->r[*pIndex] = r;
-			model->rho[*pIndex] = rho;
-			model->u[*pIndex] = u;
-			model->mat[*pIndex] = model->iLayer[iLayer];
-			++*pIndex;
-		}
-		/* Make sure that the material is in the condensed state */
-		assert(rho >= model->tillMat[model->iLayer[iLayer]]->rho0);
-	} else {
-		// For the last layer we integrate until rho == rho0. */
-		while (rho > fact*model->tillMat[model->iLayer[iLayer]]->rho0) {
-			/*
-			** Midpoint Runga-Kutta (2nd order).
-			*/
-			k1rho = h*drhodr(model,iLayer,r,rho,M,u);
-			k1M = h*dMdr(r,rho);
-			k1u = h*dudr(model,iLayer,r,rho,M,u);
-
-			k2rho = h*drhodr(model,iLayer,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
-			k2M = h*dMdr(r+0.5*h,rho+0.5*k1rho);
-			k2u = h*dudr(model,iLayer,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
-
-			rho += k2rho;
-			M += k2M;
-			u += k2u;
-			r += h;
-	
-//			fprintf(stderr,"r=%g rho=%g M=%g u=%g k1rho=%g k1M=%g k1u=%g k2rho=%g k2M=%g k2u=%g\n",
-//							r, rho, M, u, k1rho, k1M, k1u, k2rho, k2M, k2u);	
-			if (bSetModel) {
-				model->M[*pIndex] = M;
-				model->r[*pIndex] = r;
-				model->rho[*pIndex] = rho;
-				model->u[*pIndex] = u;
-				model->mat[*pIndex] = model->iLayer[iLayer];
-				++*pIndex;
-			}
-		}
-		
-		/*
-		** Now do a linear interpolation to rho == fact*rho0.
-		*/
-		x = (fact*model->tillMat[model->iLayer[iLayer]]->rho0 - rho)/k2rho;
-		fprintf(stderr,"iLayer=%i (iMat=%i), rho0=%g, rho=%g, x=%g\n",iLayer,model->iLayer[iLayer],model->tillMat[model->iLayer[iLayer]]->rho0,rho,x);
-		fprintf(stderr,"rho0-rho=%g, k2rho0=%g\n",model->tillMat[model->iLayer[iLayer]]->rho0-rho,k2rho);
-		assert(x <= 0.0);
-		r += h*x;
-		M += k2M*x;
-		rho += k2rho*x;
-		u += k2u*x;
-		
-		if (bSetModel) {
-			--*pIndex;
-			model->M[*pIndex] = M;
-			model->r[*pIndex] = r;
-			model->rho[*pIndex] = rho;
-			model->u[*pIndex] = u;
-			model->mat[*pIndex] = model->iLayer[iLayer];
-			++*pIndex;
-		}	
-	}
-
-	// Return values
-	*prho1 = rho;
-	*pu1 = u;
-	*pM1 = M;
-    *pR = r;
+//	assert(0);
 }
 
 /*
@@ -492,7 +467,8 @@ double modelSolveTwoComponent(MODEL *model,int bSetModel,double rho,double u,dou
 	// Set inital values for M1 and R
     double M = 0.0;
 	double r = 0.0;
-	double Mc = model->MLayer[0];
+	double Mc = model->fM[0];
+	int iMat;
     double k1rho,k1M,k1u,k2rho,k2M,k2u,x;
 	int i = 0;
 
@@ -505,15 +481,15 @@ double modelSolveTwoComponent(MODEL *model,int bSetModel,double rho,double u,dou
 	fprintf(stderr,"******************************************************************\n");
 	fprintf(stderr,"\n");
 
-	/*
-	** Start with the core
-	*/
+	/* Set iMat to the material for the core (usually iron). */
+	iMat = model->iMatOrder[0];
+
 	if (bSetModel) {
 		model->rho[i] = rho;
 		model->M[i] = M;
 		model->u[i] = u;
 		model->r[i] = r;
-		model->mat[i] = model->iLayer[0];
+		model->mat[i] = iMat;
 		++i;
 	}
 
@@ -524,13 +500,13 @@ double modelSolveTwoComponent(MODEL *model,int bSetModel,double rho,double u,dou
 		/*
 		** Midpoint Runga-Kutta (2nd order).
 		*/
-		k1rho = h*drhodr(model,0,r,rho,M,u);
+		k1rho = h*drhodr(model,iMat,r,rho,M,u);
 		k1M = h*dMdr(r,rho);
-		k1u = h*dudr(model,0,r,rho,M,u);
+		k1u = h*dudr(model,iMat,r,rho,M,u);
 
-		k2rho = h*drhodr(model,0,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
+		k2rho = h*drhodr(model,iMat,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
 		k2M = h*dMdr(r+0.5*h,rho+0.5*k1rho);
-		k2u = h*dudr(model,0,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
+		k2u = h*dudr(model,iMat,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
 
 		rho += k2rho;
 		M += k2M;
@@ -542,7 +518,7 @@ double modelSolveTwoComponent(MODEL *model,int bSetModel,double rho,double u,dou
 			model->M[i] = M;
 			model->u[i] = u;
 			model->r[i] = r;
-			model->mat[i] = model->iLayer[0];
+			model->mat[i] = iMat;
 			++i;
 		}
 	}
@@ -565,38 +541,40 @@ double modelSolveTwoComponent(MODEL *model,int bSetModel,double rho,double u,dou
 		model->r[i] = r;
 		model->rho[i] = rho;
 		model->u[i] = u;
-		model->mat[i] = model->iLayer[0];
+		model->mat[i] = iMat;
 		++i;
 	}
 	
 	fprintf(stderr,"\n");
 	fprintf(stderr,"******************************************************************\n");
 	fprintf(stderr,"modelSolveTwoComponent (core/mantle boundary):\n");
-	fprintf(stderr,"Core: iMat=%i rho=%g u=%g M=%g r=%g P=%g T=%g\n",model->iLayer[0],rho,u,M,r,tillPressure(model->tillMat[0],rho,u),tillTempRhoU(model->tillMat[0],rho,u));
+	fprintf(stderr,"Core: iMat=%i rho=%g u=%g M=%g r=%g P=%g T=%g\n",iMat,rho,u,M,r,tillPressure(model->tillMat[iMat],rho,u),tillTempRhoU(model->tillMat[iMat],rho,u));
 
 	/*
 	** Now calculate rho and u for the mantle using b.c. T=const and P=const.
 	*/
-	tillSolveBC(model->tillMat[0],model->tillMat[1],rho,u,&rho,&u);
+	tillSolveBC(model->tillMat[model->iMatOrder[0]],model->tillMat[model->iMatOrder[1]],rho,u,&rho,&u);
 
-	fprintf(stderr,"Mantle: iMat=%i rho=%g u=%g M=%g r=%g P=%g T=%g\n",model->iLayer[1],rho,u,M,r,tillPressure(model->tillMat[1],rho,u),tillTempRhoU(model->tillMat[1],rho,u));
+	iMat = model->iMatOrder[1];
+
+	fprintf(stderr,"Mantle: iMat=%i rho=%g u=%g M=%g r=%g P=%g T=%g\n",iMat,rho,u,M,r,tillPressure(model->tillMat[iMat],rho,u),tillTempRhoU(model->tillMat[iMat],rho,u));
 	fprintf(stderr,"******************************************************************\n");
 	fprintf(stderr,"\n");
 	
 	/*
 	** The integrate the mantle until rho(r=R)=rho0.
 	*/
-	while (rho > fact*model->tillMat[1]->rho0) {
+	while (rho > model->tillMat[iMat]->rho0) {
 		/*
 		** Midpoint Runga-Kutta (2nd order).
 		*/
-		k1rho = h*drhodr(model,1,r,rho,M,u);
+		k1rho = h*drhodr(model,iMat,r,rho,M,u);
 		k1M = h*dMdr(r,rho);
-		k1u = h*dudr(model,1,r,rho,M,u);
+		k1u = h*dudr(model,iMat,r,rho,M,u);
 
-		k2rho = h*drhodr(model,1,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
+		k2rho = h*drhodr(model,iMat,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
 		k2M = h*dMdr(r+0.5*h,rho+0.5*k1rho);
-		k2u = h*dudr(model,1,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
+		k2u = h*dudr(model,iMat,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
 
 		rho += k2rho;
 		M += k2M;
@@ -610,7 +588,7 @@ double modelSolveTwoComponent(MODEL *model,int bSetModel,double rho,double u,dou
 			model->r[i] = r;
 			model->rho[i] = rho;
 			model->u[i] = u;
-			model->mat[i] = model->iLayer[1];
+			model->mat[i] = iMat;
 			++i;
 			model->nTable = i;
 			model->dr = h;
@@ -618,11 +596,11 @@ double modelSolveTwoComponent(MODEL *model,int bSetModel,double rho,double u,dou
 	}
 
 	/*
-	** Now do a linear interpolation to rho == fact*rho0.
+	** Now do a linear interpolation to rho == rho0.
 	*/
-	x = (fact*model->tillMat[1]->rho0 - rho)/k2rho;
-	fprintf(stderr,"iMat=%i, rho0=%g, rho=%g, x=%g\n",model->iLayer[1],model->tillMat[1]->rho0,rho,x);
-	fprintf(stderr,"rho0-rho=%g, k2rho0=%g\n",model->tillMat[1]->rho0-rho,k2rho);
+	x = (model->tillMat[iMat]->rho0 - rho)/k2rho;
+	fprintf(stderr,"iMat=%i, rho0=%g, rho=%g, x=%g\n",iMat,model->tillMat[iMat]->rho0,rho,x);
+	fprintf(stderr,"rho0-rho=%g, k2rho0=%g\n",model->tillMat[iMat]->rho0-rho,k2rho);
 	assert(x <= 0.0);
 	r += h*x;
 	M += k2M*x;
@@ -635,7 +613,7 @@ double modelSolveTwoComponent(MODEL *model,int bSetModel,double rho,double u,dou
 		model->r[i] = r;
 		model->rho[i] = rho;
 		model->u[i] = u;
-		model->mat[i] = model->iLayer[1];
+		model->mat[i] = iMat;
 		++i;
 	}	
 
@@ -644,72 +622,314 @@ double modelSolveTwoComponent(MODEL *model,int bSetModel,double rho,double u,dou
 	return(M);
 }
 
+/*
+ * Calculate the density and internal energy of the atmosphere assuming
+ * P=const and T=const for an ideal gas.
+ */
+void modelSolveBCAtmosphere(MODEL *model, TILLMATERIAL *mat, double rho1, double u1, double *rho2, double *u2)
+{
+    double Ps, Ts, rho_atm, u_atm;
+
+    assert(mat->iMaterial > 0);
+
+    /*
+     * Calculate pressure and temperature at the surface (not including the atmosphere).
+     */
+    Ps = tillPressure(mat, rho1, u1);
+	Ts = tillTempRhoU(mat, rho1, u1);
+
+    assert(model->tillMat[0]->iMaterial == IDEALGAS);
+
+    /*
+     * Use cv and gamma from the ideal gas EOS.
+     */
+    u_atm = Ts*model->tillMat[0]->cv;
+
+//    fprintf(stderr,"iMat= %3i cv= %g.\n", model->tillMat[0]->iMaterial, model->tillMat[0]->cv);
+//    exit(1);
+    rho_atm = Ps/((model->tillMat[0]->dConstGamma-1.0)*u_atm);
+
+    printf("\n");
+    printf("rho= %g u= %g dConstGamma= %g (dConstGamma-1.0)= %g P= %g T= %g\n", rho_atm, u_atm, model->tillMat[0]->dConstGamma, model->tillMat[0]->dConstGamma-1.0, (model->tillMat[0]->dConstGamma-1.0)*rho_atm*u_atm, u_atm/model->tillMat[0]->cv);
+    printf("\n");
+
+    printf("mantle:   rho= %g u= %g P= %g T= %g\n", rho1, u1, Ps, Ts);
+    printf("envelope: rho= %g u= %g P= %g T= %g\n", rho_atm, u_atm, (model->tillMat[0]->dConstGamma-1.0)*rho_atm*u_atm, u_atm/model->tillMat[0]->cv);
+//    exit(1);
+    *rho2 = rho_atm;
+    *u2 = u_atm;
+}
 
 /*
-** This function integrates the ODEs for a single component model with b.c.
-** rho_initial=rho, u_initial=u until rho(r=R)=rho0. It returns the total
-** mass of the model. The parameter h sets the stepsize for the RK2 algorithm
-** and for bSetModel=1 the results are saved.
-*/
-double modelSolveSingleComponent(MODEL *model,int bSetModel,double rho,double u,double h,double *pR)
+ * This function integrates the ODEs for a three component model with b.c.
+ *
+ * rho_initial=rho, u_initial=u, M_initial=0
+ *
+ * For the inner layers it integrates until M=M_i (M_i: desired mass of
+ * layer i) and fails if rho < rho0_i. The last layer is solved until rho=rho_s
+ * where rho_s is the desired density at the surface. It returns the total mass
+ * and internal energy at the surface of the model.
+ *
+ * The parameter h sets the stepsize for the RK2 algorithm and for bSetModel=1
+ * the results are saved.
+ */
+double modelSolveThreeComponent(MODEL *model,int bSetModel,double rho,double u,double h,double *pR,double *us)
 {
 //    FILE *fp;
 	// Set inital values for M1 and R
     double M = 0.0;
 	double r = 0.0;
-	double Mc = model->MLayer[0];
+    // The cumulative mass of the core
+	double Mc = model->fM[0];
+    // The cumulative mass of the mantle (Mcore+Mmantle)
+	double Mm = Mc + model->fM[1];
+	int iMat;
     double k1rho,k1M,k1u,k2rho,k2M,k2u,x;
 	int i = 0;
-
-	assert(model->nLayer == 1);
 
 	// (CR) Debug information
 	fprintf(stderr,"\n");
 	fprintf(stderr,"******************************************************************\n");
-	fprintf(stderr,"modelSolveSingleComponent (inital values):\n");
-	fprintf(stderr,"rho: %g, u: %g, M:%g, r:%g\n",rho,u,M,r);
+	fprintf(stderr,"modelSolveThreeComponent (inital values):\n");
+	fprintf(stderr,"rho: %g, u: %g, M:%g, r:%g rhos:%g\n",rho,u,M,r,model->tillMat[0]->rho0);
 	fprintf(stderr,"bSetModel: %i, h: %g\n",bSetModel,h);
-	fprintf(stderr,"******************************************************************\n");
+	fprintf(stderr,"iMat: %i %i %i\n",model->iMatOrder[0],model->iMatOrder[1],model->iMatOrder[2]);
+    fprintf(stderr,"Mc: %g Mm: %g Matm: %g\n",model->fM[0],model->fM[1],model->fM[2]);
+    fprintf(stderr,"******************************************************************\n");
 	fprintf(stderr,"\n");
 
-	/*
-	** Save the values at the core.
-	*/
+    /* Set iMat to the material for the core (usually iron). */
+	iMat = model->iMatOrder[0];
+
+    /*
+     * Check, if the given initial conditions are physical.
+     */
+    if (tillIsBelowColdCurve(model->tillMat[iMat], rho, u))
+    {
+        return(-1.0);
+    }
+
+    if (rho <= model->tillMat[iMat]->rho0)
+    {
+        return(-1.0);
+    }
+
 	if (bSetModel) {
 		model->rho[i] = rho;
 		model->M[i] = M;
 		model->u[i] = u;
 		model->r[i] = r;
-		model->mat[i] = model->iLayer[0];
+		model->mat[i] = iMat;
 		++i;
 	}
-	
+
 	/*
-	** The integrate the mantle until rho(r=R)=rho0.
-	*/
-	while (rho > fact*model->tillMat[0]->rho0) {
+     * Step 1: Integrate the core until M == Mcore. But at the same time we
+     * have to make sure, that rho >= rho0.
+     */
+	while (M < Mc) {
 		/*
 		** Midpoint Runga-Kutta (2nd order).
 		*/
-		k1rho = h*drhodr(model,0,r,rho,M,u);
+		k1rho = h*drhodr(model,iMat,r,rho,M,u);
 		k1M = h*dMdr(r,rho);
-		k1u = h*dudr(model,0,r,rho,M,u);
+		k1u = h*dudr(model,iMat,r,rho,M,u);
 
-		k2rho = h*drhodr(model,0,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
+		k2rho = h*drhodr(model,iMat,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
 		k2M = h*dMdr(r+0.5*h,rho+0.5*k1rho);
-		k2u = h*dudr(model,0,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
+		k2u = h*dudr(model,iMat,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
 
 		rho += k2rho;
 		M += k2M;
 		u += k2u;
 		r += h;
+
+        /*
+         * Check, if the initial density is too low, so that the density falls
+         * below rho0 before we reach the desired mass.
+         */
+        if (rho <= model->tillMat[iMat]->rho0 && M < Mc)
+        {
+            return(-1.0);
+        }
+
+//      printf("%15.7E %15.7E %15.7E %15.7E %3i %15.7E\n", r, rho, M, u, iMat, model->tillMat[iMat]->rho0);
+
+		if (bSetModel) {
+			model->rho[i] = rho;
+			model->M[i] = M;
+			model->u[i] = u;
+			model->r[i] = r;
+			model->mat[i] = iMat;
+			++i;
+		}
+	}
+
+	/*
+	** Now do a linear interpolation to M == Mcore.
+	*/
+	x = (Mc - M)/k2M;
+	fprintf(stderr,"M2=%g, M=%g, x=%g\n",Mc,M,x);
+	assert(x <= 0.0);
+	r += h*x;
+	M += k2M*x;
+	rho += k2rho*x;
+	u += k2u*x;
+	fprintf(stderr,"After correction: M2=%g, M=%g, x=%g\n",Mc,M,x);
+
+	if (bSetModel) {
+		--i;
+		model->M[i] = M;
+		model->r[i] = r;
+		model->rho[i] = rho;
+		model->u[i] = u;
+		model->mat[i] = iMat;
+		++i;
+	}
 	
+	fprintf(stderr,"\n");
+	fprintf(stderr,"******************************************************************\n");
+	fprintf(stderr,"modelSolveThreeComponent (core/mantle boundary):\n");
+	fprintf(stderr,"Core: iMat=%i rho=%g u=%g M=%g r=%g P=%g T=%g\n",iMat,rho,u,M,r,tillPressure(model->tillMat[iMat],rho,u),tillTempRhoU(model->tillMat[iMat],rho,u));
+
+	/*
+     * Step 2: Calculate rho and u for the mantle using b.c. T=const and P=const.
+     */
+	tillSolveBC(model->tillMat[model->iMatOrder[0]], model->tillMat[model->iMatOrder[1]], rho, u, &rho, &u);
+
+	iMat = model->iMatOrder[1];
+
+	fprintf(stderr,"Mantle: iMat=%i rho=%g u=%g M=%g r=%g P=%g T=%g\n",iMat,rho,u,M,r,tillPressure(model->tillMat[iMat],rho,u),tillTempRhoU(model->tillMat[iMat],rho,u));
+	fprintf(stderr,"******************************************************************\n");
+	fprintf(stderr,"\n");
+
+    if (tillIsBelowColdCurve(model->tillMat[iMat], rho, u))
+    {
+        return(-1.0);
+    }
+
+	/*
+     * Step 3: Integrate the mantle until M == Mmantle. But at the same time we
+     * have to make sure, that rho >= rho0.
+     */
+	while (M < Mm) {
+		/*
+		** Midpoint Runga-Kutta (2nd order).
+		*/
+		k1rho = h*drhodr(model,iMat,r,rho,M,u);
+		k1M = h*dMdr(r,rho);
+		k1u = h*dudr(model,iMat,r,rho,M,u);
+
+		k2rho = h*drhodr(model,iMat,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
+		k2M = h*dMdr(r+0.5*h,rho+0.5*k1rho);
+		k2u = h*dudr(model,iMat,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
+
+		rho += k2rho;
+		M += k2M;
+		u += k2u;
+		r += h;
+
+        /*
+         * Check, if the initial density is too low, so that the density falls
+         * below rho0 before we reach the desired mass.
+         */
+        if (rho <= model->tillMat[iMat]->rho0 && M < Mm)
+        {
+            return(-1.0);
+        }
+
+//      printf("%15.7E %15.7E %15.7E %15.7E %3i %15.7E\n", r, rho, M, u, iMat, model->tillMat[iMat]->rho0);
+
+		if (bSetModel) {
+			model->rho[i] = rho;
+			model->M[i] = M;
+			model->u[i] = u;
+			model->r[i] = r;
+			model->mat[i] = iMat;
+			++i;
+		}
+	}
+
+	/*
+	** Now do a linear interpolation to M == Mmantle.
+	*/
+	x = (Mm - M)/k2M;
+	fprintf(stderr,"M2=%g, M=%g, x=%g\n",Mm,M,x);
+	assert(x <= 0.0);
+	r += h*x;
+	M += k2M*x;
+	rho += k2rho*x;
+	u += k2u*x;
+	fprintf(stderr,"After correction: M2=%g, M=%g, x=%g\n",Mm,M,x);
+
+	fprintf(stderr,"rho= %g u= %g\n",rho,u);
+	
+    if (bSetModel) {
+		--i;
+		model->M[i] = M;
+		model->r[i] = r;
+		model->rho[i] = rho;
+		model->u[i] = u;
+		model->mat[i] = iMat;
+		++i;
+	}
+
+    /*
+     * Step 4: Calculate rho_atm and u_atm from rho_surface and u_surface.
+     */
+	fprintf(stderr,"\n");
+	fprintf(stderr,"******************************************************************\n");
+	fprintf(stderr,"modelSolveThreeComponent (mantle/atmosphere boundary):\n");
+	fprintf(stderr,"Mantle: iMat=%i rho=%g u=%g M=%g r=%g P=%g T=%g\n",iMat,rho,u,M,r,tillPressure(model->tillMat[iMat],rho,u),tillTempRhoU(model->tillMat[iMat],rho,u));
+
+    modelSolveBCAtmosphere(model, model->tillMat[iMat], rho, u, &rho, &u);
+
+    /*
+     * Set the material for the atmosphere.
+     */
+	iMat = model->iMatOrder[2];
+
+	fprintf(stderr,"Atmosphere: iMat=%i rho=%g u=%g M=%g r=%g P=%g T=%g\n",iMat,rho,u,M,r,eosPressure(model->tillMat[iMat],rho,u),eosTempRhoU(model->tillMat[iMat],rho,u));
+	fprintf(stderr,"******************************************************************\n");
+	fprintf(stderr,"\n");
+
+	/*
+     * Step 5: Integrate the atmosphere until rho(r=R)=rho_s.
+     */
+	while (rho > model->tillMat[model->iMatOrder[2]]->rho0) {
+		/*
+		** Midpoint Runga-Kutta (2nd order).
+		*/
+		k1rho = h*drhodr(model,iMat,r,rho,M,u);
+		k1M = h*dMdr(r,rho);
+		k1u = h*dudr(model,iMat,r,rho,M,u);
+
+		k2rho = h*drhodr(model,iMat,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
+		k2M = h*dMdr(r+0.5*h,rho+0.5*k1rho);
+		k2u = h*dudr(model,iMat,r+0.5*h,rho+0.5*k1rho,M+0.5*k1M,u+0.5*k1u);
+
+		rho += k2rho;
+		M += k2M;
+		u += k2u;
+		r += h;
+
+        /*
+         * Fail, if the mass is more than three times the total desired mass.
+         */
+        if (M > 3.0*(model->fM[0]+model->fM[1]+model->fM[2]))
+        {
+            return(-1.0);
+        }
+
+//      printf("%15.7E %15.7E %15.7E %15.7E %3i %15.7E\n", r, rho, M, u, iMat, model->tillMat[iMat]->rho0);
+//		fprintf(stderr,"r=%g rho=%g M=%g u=%g k1rho=%g k1M=%g k1u=%g k2rho=%g k2M=%g k2u=%g\n",
+//							r, rho, M, u, k1rho, k1M, k1u, k2rho, k2M, k2u);	
 		if (bSetModel) {
 			model->M[i] = M;
 			model->r[i] = r;
 			model->rho[i] = rho;
 			model->u[i] = u;
-			model->mat[i] = model->iLayer[0];
+			model->mat[i] = iMat;
 			++i;
 			model->nTable = i;
 			model->dr = h;
@@ -717,9 +937,11 @@ double modelSolveSingleComponent(MODEL *model,int bSetModel,double rho,double u,
 	}
 
 	/*
-	** Now do a linear interpolation to rho == fact*rho0.
+	** Now do a linear interpolation to rho == rhos.
 	*/
-	x = (fact*model->tillMat[0]->rho0 - rho)/k2rho;
+	x = (model->tillMat[model->iMatOrder[2]]->rho0 - rho)/k2rho;
+	fprintf(stderr,"iMat=%i, rhos=%g, rho=%g, x=%g\n",iMat,model->tillMat[model->iMatOrder[2]]->rho0,rho,x);
+	fprintf(stderr,"rhos-rho=%g, k2rho=%g\n",model->tillMat[model->iMatOrder[2]]->rho0,k2rho);
 	assert(x <= 0.0);
 	r += h*x;
 	M += k2M*x;
@@ -732,50 +954,39 @@ double modelSolveSingleComponent(MODEL *model,int bSetModel,double rho,double u,
 		model->r[i] = r;
 		model->rho[i] = rho;
 		model->u[i] = u;
-		model->mat[i] = model->iLayer[0];
+		model->mat[i] = iMat;
 		++i;
 	}	
 
 	// Return values
+    if (us != NULL) *us = u;
+
     *pR = r;
 	return(M);
 }
 
 /*
-** Write the lookup table to ballic.model.
-*/
+ * Write the lookup table to ballic.model.
+ */ 
 void modelWriteToFile(MODEL *model)
 {
 	FILE *fp;
-	int iLayer;
 	int i;
 
-	fprintf(stderr,"Writing model to file.\n");
-	fp = fopen("ballic.model","w");
+    fprintf(stderr, "nTable= %i nTableMax= %i\n", model->nTable, model->nTableMax);
+	fp = fopen("ballic.model", "w");
 	assert(fp != NULL);
 
-	// (CR) Some problems here with tillMat[model->mat[i]] as the materials are now stored in the order that they appear
-	// in the model, e.g., tillMat[iMatLayer1, iMatLayer2,...].	
-	fprintf(fp,"#R  rho  M  u  mat tillPressure  tillTempRhoU\n");
-	for (i=0; i<model->nTable;i++)
-	{
-		/* Check which Layer it is from the material. This should be optimized and generalized for more layers!! */
-		if (model->mat[i] == model->iLayer[0])
-		{
-			iLayer = 0;
-		} else {
-			iLayer = 1;
-		}
-/*		fprintf(fp,"%g %g %g %g %i %g %g\n",model->r[i],model->rho[i],model->M[i],model->u[i],model->mat[i],
-			tillPressure(model->tillMat[model->mat[i]], model->rho[i], model->u[i]),
-			tillTempRhoU(model->tillMat[model->mat[i]], model->rho[i], model->u[i]));
-*/
-		fprintf(fp,"%g %g %g %g %i %g %g\n",model->r[i],model->rho[i],model->M[i],model->u[i],model->mat[i],
-			tillPressure(model->tillMat[iLayer], model->rho[i], model->u[i]),
-			tillTempRhoU(model->tillMat[iLayer], model->rho[i], model->u[i]));
-//		fprintf(fp,"%g %g %g %g %i\n",model->r[i],model->rho[i],model->M[i],model->u[i],model->mat[i]);
+    assert(model->nTable <= model->nTableMax);
 
-	
+	fprintf(fp,"#R  rho  M  u  mat tillPressure  tillTempRhoU\n");
+	for (i=0; i<model->nTable; i++)
+	{
+        printf("%i\n", i);
+		fprintf(fp,"%g %g %g %g %i %g %g\n",model->r[i],model->rho[i],model->M[i],model->u[i],model->mat[i],
+			eosPressure(model->tillMat[model->mat[i]], model->rho[i], model->u[i]),
+			eosTempRhoU(model->tillMat[model->mat[i]], model->rho[i], model->u[i]));
+//		fprintf(fp,"%15.7E %15.7E %15.7E %15.7E %i\n",model->r[i],model->rho[i],model->M[i],model->u[i],model->mat[i]);
 	}
 	fclose(fp);
 }
@@ -784,7 +995,7 @@ void modelWriteToFile(MODEL *model)
 ** This function calls modelSolveComponent for every material for a given
 ** density rhoc and internal energy uc in the code and returns the
 ** total mass of the resulting planet. If bSetModel=1 the results are saved in
-** the lookup table and both nTable and dr are set.
+** the lookup table and both nTable and dr are set.5
 */
 double modelSolveAll(MODEL *model,int bSetModel,double rhoc,double uc,double h,double *pR)
 {
@@ -807,20 +1018,20 @@ double modelSolveAll(MODEL *model,int bSetModel,double rhoc,double uc,double h,d
 
 	M = modelSolveTwoComponent(model,bSetModel,rho,u,h,&R);
 /*
-	for (i=0; i<model->nLayer; i++)
+	for (i=0; i<model->nMat; i++)
 	{
 		// Solve for component i
 		if (i == model->nMat-1)
 		{
-			fprintf(stderr,"modelSolveAll: Component:%i Index:%i h:%g rho:%g u:%g M1:%g M2:%g R:%g\n",model->iLayer[i], Index, h, rho, u, M,M+model->MLayer[i], R);
+			fprintf(stderr,"modelSolveAll: Component:%i Index:%i h:%g rho:%g u:%g M1:%g M2:%g R:%g\n",model->iMatOrder[i], Index, h, rho, u, M,M+model->fM[i], R);
 			// Enforce rho(r=R)=rho0 for the last layer
-			modelSolveComponent(model,model->iLayer[i], bSetModel, 1, &Index, h, &rho, &u, &M,M+model->MLayer[i], &R);
+			modelSolveComponent(model,model->iMatOrder[i], bSetModel, 1, &Index, h, &rho, &u, &M,M+model->fM[i], &R);
 		} else {
-			fprintf(stderr,"modelSolveAll: Component:%i Index:%i h:%g rho:%g u:%g M1:%g M2:%g R:%g\n",model->iLayer[i], Index, h, rho, u, M,M+model->MLayer[i], R);
-			modelSolveComponent(model,model->iLayer[i], bSetModel, 0, &Index, h, &rho, &u, &M,M+model->MLayer[i], &R);
+			fprintf(stderr,"modelSolveAll: Component:%i Index:%i h:%g rho:%g u:%g M1:%g M2:%g R:%g\n",model->iMatOrder[i], Index, h, rho, u, M,M+model->fM[i], R);
+			modelSolveComponent(model,model->iMatOrder[i], bSetModel, 0, &Index, h, &rho, &u, &M,M+model->fM[i], &R);
 			// Determine rho2 and u2 for the next material
-			modelSolveBC(model, &rho, &u, model->iLayer[i], model->iLayer[i+1]);
-			// tillSolveBC(model->tillMat[model->iLayer[i]],model->tillMat[i],rho,u,&rho,&u);
+			modelSolveBC(model, &rho, &u, model->iMatOrder[i], model->iMatOrder[i+1]);
+			// tillSolveBC(model->tillMat[model->iMatOrder[i]],model->tillMat[model->iMatOrder[i]],rho,u,&rho,&u);
 
 		}
 	}
@@ -850,31 +1061,28 @@ double modelSolve(MODEL *model,double M) {
     /*
     ** First estimate the maximum possible radius.
     */
-    R = cbrt(3.0*M/(4.0*M_PI*model->tillMat[model->nLayer-1]->rho0)); // Use lower density material for max radius
+    R = cbrt(3.0*M/(4.0*M_PI*model->tillMat[model->iMatOrder[1]]->rho0)); // Use lower density material for max radius
     dr = R/nStepsMax;
-    a = 2.0*model->tillMat[0]->rho0; /* starts with 100% larger central density */
+    a = 2.0*model->tillMat[model->iMatOrder[0]]->rho0; /* starts with 100% larger central density */
 
 	// (CR) Debug
 	fprintf(stderr,"R: %g a: %g\n",R,a);
 
-//	Ma = modelSolveSingleComponent(model,bSetModel=0,a,model->uc,dr,&R);
 	Ma = modelSolveTwoComponent(model,bSetModel=0,a,model->uc,dr,&R);
-//	Ma = modelSolveAll(model,bSetModel=0,a,model->uc,dr,&R);
+//    Ma = modelSolveAll(model,bSetModel=0,a,model->uc,dr,&R);
     fprintf(stderr,"first Ma:%g R:%g\n",Ma,R);
     b = a;
     Mb = 0.5*M;
     while (Ma > M) {
 		b = a;
 		Mb = Ma;
-		a = 0.5*(model->tillMat[model->iLayer[0]]->rho0 + a);
-//		Ma = modelSolveSingleComponent(model,bSetModel=0,a,model->uc,dr,&R);
+		a = 0.5*(model->tillMat[model->iMatOrder[0]]->rho0 + a);
 		Ma = modelSolveTwoComponent(model,bSetModel=0,a,model->uc,dr,&R);
 //		Ma = modelSolveAll(model,bSetModel=0,a,model->uc,dr,&R);
 	}
     while (Mb < M) {
 		b = 2.0*b;
-//	   	Mb = modelSolveSingleComponent(model,bSetModel=0,b,model->uc,dr,&R);	
-		Mb = modelSolveTwoComponent(model,bSetModel=0,b,model->uc,dr,&R);	
+	   	Mb = modelSolveTwoComponent(model,bSetModel=0,b,model->uc,dr,&R);	
 //	   	Mb = modelSolveAll(model,bSetModel=0,b,model->uc,dr,&R);	
 		fprintf(stderr,"first Mb:%g R:%g\n",Mb,R);
 	}
@@ -887,8 +1095,7 @@ double modelSolve(MODEL *model,double M) {
     */
     while (Mb-Ma > 1e-10*Mc) {
 		c = 0.5*(a + b);
-//		Mc = modelSolveSingleComponent(model,bSetModel=0,c,model->uc,dr,&R);
-		Mc = modelSolveTwoComponent(model,bSetModel=0,c,model->uc,dr,&R);
+        Mc = modelSolveTwoComponent(model,bSetModel=0,c,model->uc,dr,&R);	
 //		Mc = modelSolveAll(model,bSetModel=0,c,model->uc,dr,&R);	
 	if (Mc < M) {
 	    a = c;
@@ -903,19 +1110,19 @@ double modelSolve(MODEL *model,double M) {
     /*
     ** Solve it once more setting up the lookup table.
     */
-    fprintf(stderr,"rho_core: %g cv: %g uc: %g (in system units)\n",c,model->tillMat[0]->cv,model->uc);
-//    Mc = modelSolveSingleComponent(model,bSetModel=1,c,model->uc,dr,&R);
-	Mc = modelSolveTwoComponent(model,bSetModel=1,c,model->uc,dr,&R);
+    fprintf(stderr,"rho_core: %g cv: %g uc: %g (in system units)\n",c,model->tillMat[MATERIAL]->cv,model->uc);
+    Mc = modelSolveTwoComponent(model,bSetModel=1,c,model->uc,dr,&R);
 	// This is only needed for modelSolveTwoComponent
 	modelWriteToFile(model);
 //    Mc = modelSolveAll(model,bSetModel=1,c,model->uc,dr,&R);
     model->R = R;
     return c;
     }
+
 /*
 ** This code depends on the arrays being ordered in r but does not change
-** if M, rho or u are not monotonic. However the discontinuities in rho
-** u must be handled appropriately.
+** if M, rho or u are not monotonic. So no changes needed for multi
+** component models.
 */
 double MLookup(MODEL *model,double r) {
     double x,xi,dr;
@@ -1054,14 +1261,7 @@ double rShell2(MODEL *model,int bIcosa,double m,double ri,int ns) {
 	}
 
 /*
-** Generate a HEALPix or Icosahedron grid and distribute the particles on it.
-** mTot:		Desired mass total mass
-** nDesired:	Desired number of particles (can vary due to constraints from the grid)
-** ucore:		Value of the total energy in the center of the model (ucore = u(r=0))
-** bCentral:	Do we want a central particle
-** bIcosa:		Use Icosahedron grid (if 0 use HEALPIX) 
-**
-** This is a two component version of ballic that solves the problem of distributing the particles separately for the core and the mantle.
+** New version of ballic that solves the problem of distributing the particles separately for the core and the mantle.
 */
 void main(int argc, char **argv) {
     const int bCentral = 1;
@@ -1088,7 +1288,7 @@ void main(int argc, char **argv) {
     /*
      * Parameters to solve the model.
      */
-    double rhocore, ucore, R;
+    double rhocore, ucore, R, us;
     int bSetModel;
     int iter;
     int nSmooth;
@@ -1096,15 +1296,21 @@ void main(int argc, char **argv) {
     FILE *fpi,*fpo;
     int iRet,i;
 	double mCore;
-	/* A first guess for the number of particles of a layer. */
-	int nDesiredLayer;
-	int nReachedLastLayer = 0;
-	int iShellLastLayer = 0;
-	int iLayer;
-	double rLayer; /* Final Radius of one layer. */
+    /*
+     * The number of components in the model. Note that this is not the same as
+     * model->nMat, which is the total number of materials in the library.
+     */
+    int nLayer;
+	/* A first guess for the number of particles of a material. */
+	int nDesiredMat;
+	int nReachedLastMat = 0;
+	int iShellLastMat = 0;
+	int iMat;
+	double rMat; /* Final Radius of one component. */
 
     const int nStepsMax = 10000;
 
+#if 0
     if (argc != 5) {
 		fprintf(stderr,"Usage: ballic <nDesired> <TotalMass> <rhocore> <ucore> >myball.std\n");
 		exit(1);
@@ -1115,25 +1321,44 @@ void main(int argc, char **argv) {
 	mTot = atof(argv[2]);
 	rhocore = atof(argv[3]);
     ucore = atof(argv[4]);
+#endif
 
-    model = modelInit(mTot,ucore);
-//	double R = 0.0;
+    /*
+     * Hard coded a model with three layers: core, mantle and envelope.
+     */
+    nLayer = 3;
 
 	fprintf(stderr,"Model initialized.\n"); // CR
     /*
      * Solve the model for given M, rhoc and uc.
      */
-//    rhoCenter = modelSolve(model,mTot);
     rhoCenter = rhocore;
-	R = cbrt(3.0*mTot/(4.0*M_PI*model->tillMat[model->nLayer-1]->rho0));
-    mTot = modelSolveTwoComponent(model, bSetModel=1, rhocore, ucore, R/nStepsMax, &R);
-	modelWriteToFile(model);
+
+    /*
+     * Model with M=62.366 and three components:
+     * Core:     Iron
+     * Mantle:   Granite
+     * Envelope: Ideal gas
+     *
+     * 589 176   4.1780000E+01   8.5200000E+00   6.2366582E+01   6.8733496E-02
+     */
+    rhocore = 4.1780000E+01;
+    ucore = 8.5200000E+00;
+    mTot = 62.366;
+	nDesired = 100000;
+
+    model = modelInit(mTot,ucore);
+
+	R = cbrt(3.0*mTot/(4.0*M_PI*model->tillMat[model->iMatOrder[nLayer-2]]->rho0));
+    mTot = modelSolveThreeComponent(model, bSetModel=1, rhocore, ucore, R/nStepsMax, &R, &us);
+    modelWriteToFile(model);
 	fprintf(stderr,"Model solved.\n");	// CR
+
 #if 0
 	/*
 	** Desired number of particles in the core (Nc=fc*N).
 	*/
-	mCore = model->MLayer[0];
+	mCore = model->fM[0];
 	nDesiredCore = mCore/mTot*nDesired;
 #endif
 	//m = mTot/nDesired;   /* a first guess at the particle mass */
@@ -1171,56 +1396,64 @@ void main(int argc, char **argv) {
 	fprintf(stderr,"\n");
 	fprintf(stderr,"*******************************************************\n");
 	fprintf(stderr,"Distributing shells.\n");
-	fprintf(stderr,"nLayer=%i nDesired=%i mTot=%g\n",model->nLayer,nDesired,mTot);
+	fprintf(stderr,"nMat=%i nDesired=%i mTot=%g\n",model->nMat,nDesired,mTot);
 	fprintf(stderr,"*******************************************************\n");
 	fprintf(stderr,"\n");
-	for (iLayer=0;iLayer<model->nLayer;iLayer++)
+	for (iMat=0;iMat<model->nMat;iMat++)
 	{
-		fprintf(stderr,"Layer %i (Material %i):\n",iLayer,model->iLayer[iLayer]);
-		fprintf(stderr,"tillMat=%i MLayer=%g nDesiredMat=%g m=%g (estimate)\n",
-		model->iLayer[iLayer],
-		model->MLayer[iLayer],
-		model->MLayer[iLayer]/mTot*nDesired,
-		model->MLayer[iLayer]/(model->MLayer[iLayer]/mTot*nDesired));
+		fprintf(stderr,"Material %i:\n",iMat);
+		fprintf(stderr,"tillMat=%i fM=%g nDesiredMat=%g m=%g (estimate)\n",
+		model->iMatOrder[iMat],
+		model->fM[iMat],
+		model->fM[iMat]/mTot*nDesired,
+		model->fM[iMat]/(model->fM[iMat]/mTot*nDesired));
 	}
 
 	/*
 	** Distribute the particles in shells for each material separately.
 	*/
-	for (iLayer=0;iLayer<model->nLayer;iLayer++)
+//	for (iMat=0;iMat<model->nMat;iMat++)
+
+	for (iMat=0;iMat<nLayer;iMat++)
 	{
-		/* Careful, iLayer is the number in which the materials are ordered in model->iLayer[]. */
-		nDesiredLayer = model->MLayer[iLayer]/mTot*nDesired+nReachedLastLayer;
-		m = model->MLayer[iLayer]/nDesiredLayer;   /* a first guess at the particle mass */
+		/*
+         * Careful, iMat is the number in which the materials are ordered in iMatOrder.
+         */
+		nDesiredMat = model->fM[iMat]/mTot*nDesired+nReachedLastMat;
+		m = model->fM[iMat]/nDesiredMat;   /* a first guess at the particle mass */
 		
 		fprintf(stderr,"\n");
-		fprintf(stderr,"Layer: %i Material %i: nDesiredLayer=%i M=%g m=%g\n",iLayer,model->iLayer[iLayer], nDesiredLayer, model->MLayer[iLayer],m);
+		fprintf(stderr,"Material %i: nDesiredMat=%i M=%g m=%g\n",iMat, nDesiredMat, model->fM[iMat],m);
 
 		/*
 		** Phase 1: We first determine the number of particles per shell such that
 		** the ratio of radial to tangential lengths of their volumes is as close
 		** to 1 as possible. This fixes the total number of particles in the model.
 		*/
-		fprintf(stderr,"PHASE 1: ODE approach (iLayer=%i)\n",iLayer);
+		fprintf(stderr,"PHASE 1: ODE approach (iMat=%i)\n",iMat);
 		for (iter=0;iter<2;++iter) {
-			if (iLayer == 0)
+			if (iMat == 0)
 			{
 				/* Initialize nReached, ro and iShell for material 0. */
 				nReached = 0;
 				/* Set starting radius */
 				if (bCentral) {
 					ro = rShell(model,m,0.0);
-				} else {
+				}
+				else {
 					ro = 0.0;
 				}
 				iShell = 0;
-				rLayer = 0.0;
+				rMat = 0.0;
 			} else {
-				/* For the other layers we start from rLayer of the previous material. */
-				ro = rLayer;
-				nReached = nReachedLastLayer;
-				iShell = iShellLastLayer;
+				/* For the other components we start from rMat of the previous material. */
+				ro = rMat;
+				nReached = nReachedLastMat;
+				iShell = iShellLastMat;
 			}
+
+//			(CR) Debug
+//			assert(iter == 0);
 
 			for (;;) {
 				ri = ro;
@@ -1257,7 +1490,8 @@ void main(int argc, char **argv) {
 						na = ns;
 						roa = ros;
 						rta = rts;
-					} else {
+					}
+					else {
 						nb = ns;
 						rob = ros;
 						rtb = rts;
@@ -1294,7 +1528,7 @@ void main(int argc, char **argv) {
 				}
 				nsShell[iShell] = ns;
 /*				fprintf(stderr,"nReached:%d npix:%d\n",nReached,npix);*/
-				if ((nReached + npix) < nDesiredLayer) {
+				if ((nReached + npix) < nDesiredMat) {
 					nReached += npix;
 					fprintf(stderr,"iShell:%d ns:%d radial/tangential:%g\n",iShell,ns,rts);
 					++iShell;
@@ -1306,7 +1540,7 @@ void main(int argc, char **argv) {
 			}  /* end of iShell loop */
 			ns = nsShell[iShell-1];
 			npix = (bIcosa)?(40*ns*(ns-1)+12):(12*ns*ns);	
-			if (nDesiredLayer - nReached > npix/2) {
+			if (nDesiredMat - nReached > npix/2) {
 				nReached += npix;
 				nsShell[nShell] = ns;
 				fprintf(stderr,"iShell:%d ns:%d radial/tangential:??? (added)\n",nShell,ns);
@@ -1314,41 +1548,42 @@ void main(int argc, char **argv) {
 			}
 
 			fprintf(stderr,"nReached:%d old mass:%.7g new mass:%.7g\n",
-				nReached,m,model->MLayer[iLayer]/nReached);
+				nReached,m,model->fM[iMat]/nReached);
 //			fprintf(stderr,"nReached:%d old mass:%.7g new mass:%.7g\n",
 //				nReached,m,mTot/nReached);
 			/* Update particles mass for the reached number of particles. */
-			m = model->MLayer[iLayer]/(nReached-nReachedLastLayer);
-			fprintf(stderr,"PHASE 1 update m: nReached=%i nReachedLastLayer=%i dReached=%i iShell=%i iShellLastLayer=%i nDesired=%i M=%g m=%g\n",nReached,nReachedLastLayer,nReached-nReachedLastLayer,iShell,iShellLastLayer,nDesiredLayer,model->MLayer[iLayer],m);
+			m = model->fM[iMat]/(nReached-nReachedLastMat);
+			fprintf(stderr,"PHASE 1 update m: nReached=%i nReachedLastMat=%i dReached=%i iShell=%i iShellLastMat=%i nDesired=%i M=%g m=%g\n",nReached,nReachedLastMat,nReached-nReachedLastMat,iShell,iShellLastMat,nDesiredMat,model->fM[iMat],m);
 //			m = mTot/nReached;
-			nDesiredLayer = nReached+1;
+			nDesiredMat = nReached+1;
 		}
 //assert(0);
-		fprintf(stderr,"PHASE 1 done: nReached=%i nReachedLastLayer=%i iShell=%i iShellLastLayer=%i nDesired=%i M=%g m=%g\n",nReached,nReachedLastLayer,iShell,iShellLastLayer,nDesiredLayer,model->MLayer[iLayer],m);
+		fprintf(stderr,"PHASE 1 done: nReached=%i nReachedLastMat=%i iShell=%i iShellLastMat=%i nDesired=%i M=%g m=%g\n",nReached,nReachedLastMat,iShell,iShellLastMat,nDesiredMat,model->fM[iMat],m);
 		/* Save how many particles we distributed for the last material. */
-//		nReachedLastLayer = nReached;
-//		iShellLastLayer = iShell;
+//		nReachedLastMat = nReached;
+//		iShellLastMat = iShell;
 
 		/*
 		** Phase 2: With the numbers of particles in each of the shells now fixed
 		** we continue by recalculating the radii of the shells based on the updated
 		** particle mass.
 		*/
-		fprintf(stderr,"PHASE 2 (iLayer=%i)\n",iLayer);
-		// (CR) For iLayer > 0 we have to set ro properly...
-		if (iLayer == 0)
+		fprintf(stderr,"PHASE 2 (iMat=%i)\n",iMat);
+		// (CR) For iMat > 0 we have to set ro properly...
+		if (iMat == 0)
 		{
 			if (bCentral) {
 				ro = rShell(model,m,0.0);
-			} else {
+			}
+			else {
 				ro = 0.0;
 			}
 		} else {
-			/* For the other components we start from rLayer of the previous material. */
-			ro = rLayer;
+			/* For the other components we start from rMat of the previous material. */
+			ro = rMat;
 		}
 		
-		for (iShell=iShellLastLayer;iShell<nShell;++iShell) {
+		for (iShell=iShellLastMat;iShell<nShell;++iShell) {
 			ri = ro;
 			ns = nsShell[iShell];
 			ro = rShell2(model,bIcosa,m,ri,ns);
@@ -1375,10 +1610,26 @@ void main(int argc, char **argv) {
 
 			u = uLookup(model,rs); /* We also have to look up u from a table */
 
-			// Set rLayer to ro
-			rLayer = ro;
+			// Set rMat to ro
+			rMat = ro;
+			/* This is old code used to debug the grid. */
+#if 0
+			eta = rho/model->tillMat[MATERIAL]->rho0;
+			/* This was the old code using a constant internal energy uFixed.
+			w0 = model->uFixed/(model->par.u0*eta*eta) + 1.0;
+			dPdrho = (model->par.a + (model->par.b/w0)*(3 - 2/w0))*model->uFixed + 
+					(model->par.A + 2*model->par.B*(eta - 1))/model->par.rho0;
+
+			fprintf(stderr,"iShell:%d r:%g M:%g rho:%g ns:%d radial/tangential:%g dr:%g <? Jeans:%g Gamma:%g\n",iShell,rs,MLookup(model,rs),rho,ns,rts,ro-ri,sqrt(dPdrho/rho),Gamma(model,rho,model->uFixed));
+        	*/	
+			w0 = u/(model->tillMat[MATERIAL]->u0*eta*eta) + 1.0;
+			dPdrho = (model->tillMat[MATERIAL]->a + (model->tillMat[MATERIAL]->b/w0)*(3 - 2/w0))*u + 
+					(model->tillMat[MATERIAL]->A + 2*model->tillMat[MATERIAL]->B*(eta - 1))/model->tillMat[MATERIAL]->rho0;
+
+//  		fprintf(stderr,"iShell:%d r:%g M:%g rho:%g u:%g ns:%d radial/tangential:%g dr:%g <? Jeans:%g Gamma:%g\n",iShell,rs,MLookup(model,rs),rho,u,ns,rts,ro-ri,sqrt(dPdrho/rho),Gamma(model,rho,u));
+#endif
 		}
-		fprintf(stderr,"PHASE 2 done: nReached=%i nReachedLastLayer=%i iShell=%i iShellLastLayer=%i nDesired=%i M=%g m=%g rLayer=%g ro=%g\n",nReached,nReachedLastLayer,iShell,iShellLastLayer,nDesiredLayer,model->MLayer[iLayer],m,rLayer,ro);
+		fprintf(stderr,"PHASE 2 done: nReached=%i nReachedLastMat=%i iShell=%i iShellLastMat=%i nDesired=%i M=%g m=%g rMat=%g ro=%g\n",nReached,nReachedLastMat,iShell,iShellLastMat,nDesiredMat,model->fM[iMat],m,rMat,ro);
 		/*
 		** Now generate the coordinates of all the particles in each shell as they are on the unit
 		** sphere. This simplifies the later adjusting of the radii of the shells (unit sphere 
@@ -1403,28 +1654,44 @@ void main(int argc, char **argv) {
 		*/
 		for (j=0;j<3;++j) gp.vel[j] = 0.0;
 		gp.phi = 0.0;
+#if 0
+		/*
+		** If we have a central particle, the particle mass has to be adjusted.
+		*/
+		if (bCentral) {
+			fprintf(stderr,"\n");
+			fprintf(stderr,"mTot= %g m= %g",mTot,m);
+			m = mTot/(nReached+1);
+			fprintf(stderr,"  m= %g nReached= %i nReachedLastMat= %i\n",m,nReached, nReachedLastMat);
+			fprintf(stderr,"Adjusted particle mass accounting for the central particle.\n");
+			fprintf(stderr,"\n");
+		}
+#endif
 		gp.mass = m;
+
 		/* Save the material */
-		gp.metals = model->iLayer[iLayer];
+		gp.metals = model->iMatOrder[iMat];
 		nLast = nReached;
-		/* Start writing from nReachedLastLayer otherwise we write the inner components more than once. */
-		nReached = nReachedLastLayer;
+
+		/* Start writing from nReachedLastMat otherwise we write the inner components more than once. */
+		nReached = nReachedLastMat;
 //		nReached = 0;
 
 //*****************************************************************************************************************************************
-//		(CR) 19.1.16: Writing a central particle that was not originally included in the calculation could cause the mass to deviate from M
+//		(CR) 19.1.16: Writing a central particle that was not originally included in the calculation could cause the mass to deviate from M (this was fixed on 17.4.2017 in the sense that the total mass of the SPH model is consistent now).
 //*****************************************************************************************************************************************
-		if (bCentral && iLayer==0) {
-			/* Write the central particle (only for iLayer=0). */
+		if (bCentral && iMat==0) {
+			/* Write the central particle (only for iMat=0). */
 			for (j=0;j<3;++j) gp.pos[j] = 0.0;
 			gp.temp = uLookup(model, 0);
 			// Dont forget to set the material for the central particle
-			//gp.metals = model->iLayer[iLayer];
+			gp.metals = model->iMatOrder[iMat];
 			TipsyAddGas(out,&gp);
 		}
 
-		/* Start writing from iShellLastLayer otherwise we write the inner components more than once. */
-		for (iShell=iShellLastLayer;iShell<nShell;++iShell) {
+		/* Start writing from iShellLastMat otherwise we write the inner components more than once. */
+//		for (iShell=0;iShell<nShell;++iShell) {
+		for (iShell=iShellLastMat;iShell<nShell;++iShell) {
 			rs = rsShell[iShell];
 			ns = nsShell[iShell];
 			npix = (bIcosa)?(40*ns*(ns-1)+12):(12*ns*ns);
@@ -1456,54 +1723,13 @@ void main(int argc, char **argv) {
 		}
 
 		/* Save how many particles we distributed for the last material. */
-		nReachedLastLayer = nReached;
-		iShellLastLayer = iShell;
-
-		fprintf(stderr,"iLayer %i: iShell=%i nReached=%i\n",iLayer, iShell, nReached);
-	} /* iLayer */
+		nReachedLastMat = nReached;
+		iShellLastMat = iShell;
+	} /* iMat */
  	fprintf(stderr,"\n");
 	fprintf(stderr,"Writing %d particles. Model R:%g Last Shell r:%g\n",nReached,model->R,rsShell[nShell-1]);
 
 	/* Write all particles to ballic.std */
 	TipsyWriteAll(out,0.0,"ballic.std");
 	TipsyFinish(out);
-
-	/*
-	** This code was added by Joachim to have a radial density profile (smoothed) for debugging.
-	*/
-#if 0	
-	/* Smooth with gather doesn work with my version! */
-	system("sleep 1; smooth -s 128 density <ballic.std; sleep 1");
-
-	/* Write the smoothed quantities to a file. */
-	fpi = fopen("smooth.den","r");
-	assert(fpi != NULL);
-	fpo = fopen("ballic.den","w");
-	assert(fpo != NULL);
-	iRet = fscanf(fpi,"%d",&nReached);
-	assert(iRet == 1);
-
-	if (bCentral) {
-		iRet = fscanf(fpi,"%lf",&rho);
-		assert(iRet == 1);
-		fprintf(fpo,"0.0 %g\n",rho);
-		nReached -= 1;
 	}
-    
-	for (iShell=0;iShell<nShell;++iShell) {
-		rs = rsShell[iShell];
-		ns = nsShell[iShell];
-		npix = (bIcosa)?(40*ns*(ns-1)+12):(12*ns*ns);
-		nReached -= npix;
-		for (ipix = 0;ipix < npix;++ipix) {
-			iRet = fscanf(fpi,"%lf",&rho);
-			assert(iRet == 1);
-			fprintf(fpo,"%g %g\n",rs,rho);
-		}
-	}
-	fclose(fpi);
-	fclose(fpo);
-	assert(nReached == 0);
-#endif
-	}
-

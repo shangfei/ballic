@@ -59,6 +59,11 @@ multi.atm: ballic.multi.atm.o $(tipsy_objects) $(till_objects) $(fortran_objects
 	cc -o ballic.multi.atm ballic.multi.atm.o $(tipsy_objects) $(till_objects) $(fortran_objects) -lm
 
 #
+# The three component version of ballic. It generates a planet with a core, mantle and gas envelope.
+#
+atm: ballic.atm.o $(tipsy_objects) $(till_objects) $(fortran_objects)
+	cc -o ballic.atm ballic.atm.o $(tipsy_objects) $(till_objects) $(fortran_objects) -lm
+#
 # Calculates an equilibrium models for different rhoc and uc.
 #
 solve_model_array: solve_model_array.o $(till_objects)
