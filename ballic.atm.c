@@ -280,7 +280,7 @@ MODEL *modelInit(double M,double ucore) {
 #endif
 
 	// Earth like planet with an atmosphere
-//#if 0
+#if 0
 	model->iMatOrder[0] = IRON;
 	model->iMatOrder[1] = GRANITE;
 	model->iMatOrder[2] = IDEALGAS;
@@ -288,6 +288,16 @@ MODEL *modelInit(double M,double ucore) {
 	model->fM[0] = 0.3*M;
 	model->fM[1] = 0.6*M;
 	model->fM[2] = 0.1*M;
+#endif
+	// Ice giant (10% rock core, 75.19% ice mantle and 14.81% atmosphere)
+//#if 0
+	model->iMatOrder[0] = GRANITE;
+	model->iMatOrder[1] = ICE;
+	model->iMatOrder[2] = IDEALGAS;
+	// It might be better so save M in model and use only mass fractions in fM
+	model->fM[0] = 0.1*M;
+	model->fM[1] = 0.7519*M;
+	model->fM[2] = 0.1481*M;
 //#endif
 
 	fprintf(stderr,"Initializing model:\n");
@@ -1334,17 +1344,32 @@ void main(int argc, char **argv) {
      */
     rhoCenter = rhocore;
 
+#if 0
     /*
      * Model with M=62.366 and three components:
      * Core:     Iron
      * Mantle:   Granite
      * Envelope: Ideal gas
      *
-     * 589 176   4.1780000E+01   8.5200000E+00   6.2366582E+01   6.8733496E-02
+     * 589   176   4.1780000E+01   8.5200000E+00   6.2366582E+01   6.8733496E-02
      */
     rhocore = 4.1780000E+01;
     ucore = 8.5200000E+00;
     mTot = 62.366;
+	nDesired = 100000;
+#endif
+
+    /*
+     * Uranus: M=13.5 ME (844.393) with three components:
+     * Core:     Granite
+     * Mantle:   Ice
+     * Envelope: Ideal gas
+     *
+     * 951   641   4.42650000e+01   6.96150000e+01   8.44393180e+02   2.90598500e-02
+     */
+    rhocore = 4.42650000e+01;
+    ucore = 6.96150000e+01;
+    mTot = 844.393;
 	nDesired = 100000;
 
     model = modelInit(mTot,ucore);
