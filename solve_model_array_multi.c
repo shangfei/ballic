@@ -469,6 +469,227 @@ int modelSolveComponent(MODEL *model, int iMat, int bSetModel, int bLastLayer, i
     return (iRet);
 }
 
+/*
+ * The same as modelSolveComponent() but it uses a 4th order Runge-Kutta to
+ * integrate the structure equations.
+ */
+int modelSolveComponentRK4(MODEL *model, int iMat, int bSetModel, int bLastLayer, int *pIndex, double h, double *prho, double *pu,double *pM, double M_component, double *pR)
+{
+	double r, rho, M, u;
+    double k1rho, k1M, k1u, k2rho, k2M, k2u, x;
+    double k3rho, k3M, k3u, k4rho, k4M, k4u;
+    int i, iRet;
+
+    /*
+     * Initial values.
+     */
+    rho = *prho;
+    u = *pu;
+    M = *pM;
+    r = *pR;
+
+    if (bSetModel)
+    {
+        i = *pIndex;
+    }
+
+    iRet = 0;
+
+	/*
+     * Output some diagnostic information.
+     */
+	fprintf(stderr,"\n");
+	fprintf(stderr,"******************************************************************\n");
+	fprintf(stderr,"modelSolveComponent (inital values):\n");
+	fprintf(stderr,"iMat: %i, Index: %i, h: %g\n",iMat, i, h);
+	fprintf(stderr,"rho: %g, u: %g, M:%g, r:%g\n",rho, u, M, r);
+	fprintf(stderr,"bSetModel: %i, bLastLayer: %i\n", bSetModel, bLastLayer);
+	fprintf(stderr,"******************************************************************\n");
+	fprintf(stderr,"\n");
+
+
+	if (bSetModel)
+    {
+		model->rho[i] = rho;
+		model->M[i] = M;
+		model->u[i] = u;
+		model->r[i] = r;
+		model->mat[i] = iMat;
+		++i;
+	}
+
+    /*
+     * Check, if the given initial conditions are physical.
+     */
+    if (tillIsBelowColdCurve(model->tillMat[iMat], rho, u))
+    {
+        iRet = 1;
+        return(iRet);
+    }
+
+    if (rho <= model->tillMat[iMat]->rho0)
+    {
+        iRet = 1;
+        return(iRet);
+    }
+
+	if (bLastLayer != 1)
+	{
+        /*
+         * For the inner layers integrate until M == M_component and assert that
+         * rho >= rho0.
+         */
+		while (M < M_component)
+        {
+			/*
+             * 4th order Runge-Kutta.
+             */
+			k1rho = h*drhodr(model, iMat, r, rho, M, u);
+			k1M = h*dMdr(r, rho);
+			k1u = h*dudr(model, iMat, r, rho, M, u);
+
+			k2rho = h*drhodr(model, iMat, r+0.5*h, rho+0.5*k1rho, M+0.5*k1M, u+0.5*k1u);
+			k2M = h*dMdr(r+0.5*h, rho+0.5*k1rho);
+			k2u = h*dudr(model, iMat, r+0.5*h, rho+0.5*k1rho, M+0.5*k1M, u+0.5*k1u);
+
+			k3rho = h*drhodr(model, iMat, r+0.5*h, rho+0.5*k2rho, M+0.5*k2M, u+0.5*k2u);
+			k3M = h*dMdr(r+0.5*h, rho+0.5*k2rho);
+			k3u = h*dudr(model, iMat, r+0.5*h, rho+0.5*k2rho, M+0.5*k2M, u+0.5*k2u);
+
+			k4rho = h*drhodr(model, iMat, r+h, rho+k3rho, M+k3M, u+k3u);
+			k4M = h*dMdr(r+h, rho+k3rho);
+			k4u = h*dudr(model, iMat, r+h, rho+k3rho, M+k3M, u+k3u);
+
+            rho += k1rho/6.0+k2rho/3.0+k3rho/3.0+k4rho/6.0;
+			M += k1M/6.0+k2M/3.0+k3M/3.0+k4M/6.0;
+			u += k1u/6.0+k2u/3.0+k3u/3.0+k4u/6.0;
+			r += h;
+
+            /*
+             * Assert that rho >= rho0.
+             */
+            if (rho <= model->tillMat[iMat]->rho0 && M < M_component)
+            {
+                iRet = 1;
+                return(iRet);
+            }
+
+            printf("%15.7E %15.7E %15.7E %15.7E\n", r, rho, M, u);
+
+			if (bSetModel)
+            {
+				model->rho[i] = rho;
+				model->M[i] = M;
+				model->u[i] = u;
+				model->r[i] = r;
+				model->mat[i] = iMat;
+				++i;
+		    }
+		}
+        
+        /*
+         * Now do a linear interpolation to M == M_component.
+         */
+        x = (M_component - M)/k2M;
+//        printf(stderr,"M2=%g, M=%g, x=%g\n",Mc,M,x);
+        assert(x <= 0.0);
+        r += h*x;
+        M += k2M*x;
+        rho += k2rho*x;
+        u += k2u*x;
+//        fprintf(stderr,"After correction: M2=%g, M=%g, x=%g\n",Mc,M,x);
+
+        if (bSetModel) {
+            --i;
+            model->M[i] = M;
+            model->r[i] = r;
+            model->rho[i] = rho;
+            model->u[i] = u;
+            model->mat[i] = iMat;
+            ++i;
+        }
+	} else {
+        /*
+         * In case of the most outer layer integrate until rho == rho0.
+         */
+        while (rho > model->tillMat[iMat]->rho0)
+        {
+            /*
+             * 4th order Runge-Kutta.
+             */
+			k1rho = h*drhodr(model, iMat, r, rho, M, u);
+			k1M = h*dMdr(r, rho);
+			k1u = h*dudr(model, iMat, r, rho, M, u);
+
+			k2rho = h*drhodr(model, iMat, r+0.5*h, rho+0.5*k1rho, M+0.5*k1M, u+0.5*k1u);
+			k2M = h*dMdr(r+0.5*h, rho+0.5*k1rho);
+			k2u = h*dudr(model, iMat, r+0.5*h, rho+0.5*k1rho, M+0.5*k1M, u+0.5*k1u);
+
+			k3rho = h*drhodr(model, iMat, r+0.5*h, rho+0.5*k2rho, M+0.5*k2M, u+0.5*k2u);
+			k3M = h*dMdr(r+0.5*h, rho+0.5*k2rho);
+			k3u = h*dudr(model, iMat, r+0.5*h, rho+0.5*k2rho, M+0.5*k2M, u+0.5*k2u);
+
+			k4rho = h*drhodr(model, iMat, r+h, rho+k3rho, M+k3M, u+k3u);
+			k4M = h*dMdr(r+h, rho+k3rho);
+			k4u = h*dudr(model, iMat, r+h, rho+k3rho, M+k3M, u+k3u);
+
+            rho += k1rho/6.0+k2rho/3.0+k3rho/3.0+k4rho/6.0;
+			M += k1M/6.0+k2M/3.0+k3M/3.0+k4M/6.0;
+			u += k1u/6.0+k2u/3.0+k3u/3.0+k4u/6.0;
+			r += h;
+
+            printf("%15.7E %15.7E %15.7E %15.7E\n", r, rho, M, u);
+
+			if (bSetModel)
+            {
+				model->rho[i] = rho;
+				model->M[i] = M;
+				model->u[i] = u;
+				model->r[i] = r;
+				model->mat[i] = iMat;
+				++i;
+		    }
+		}
+
+        /*
+         * Now do a linear interpolation to rho == rho0.
+         */
+        x = (model->tillMat[iMat]->rho0 - rho)/k2rho;
+        assert(x <= 0.0);
+        
+        r += h*x;
+        M += k2M*x;
+        rho += k2rho*x;
+        u += k2u*x;
+
+        if (bSetModel)
+        {
+            --i;
+            model->M[i] = M;
+            model->r[i] = r;
+            model->rho[i] = rho;
+            model->u[i] = u;
+            model->mat[i] = iMat;
+            ++i;
+        }
+    } // if (bSetModel != 1)
+
+
+    /*
+     * Return values.
+     */
+    *pR = r;
+    *prho = rho;
+    *pM = M;
+    *pu = u;
+
+    if (bSetModel)
+    {
+        *pIndex = i;
+    }
+
+    return (iRet);
+}
 #if 0
 /*
 ** This function integrates the ODEs with b.c. rho_initial=rho1, u_initial=u1
@@ -1406,10 +1627,12 @@ void main(int argc, char **argv) {
     fprintf(stderr, "Running modelSolveComponent() with parameters: r= %g, rho=%g, M=%g and u=%g\n", R, rho, M, u);
 
     // With bLastLayer = 0
-    modelSolveComponent(model, GRANITE, 0, 0, NULL, dr, &rho, &u, &M, 62.366, &R);
+//    modelSolveComponent(model, GRANITE, 0, 0, NULL, dr, &rho, &u, &M, 62.366, &R);
+//    modelSolveComponentRK4(model, GRANITE, 0, 0, NULL, dr, &rho, &u, &M, 62.366, &R);
 
     // With bLastLayer = 1
 //    modelSolveComponent(model, GRANITE, 0, 1, NULL, dr, &rho, &u, &M, 62.366, &R);
+    modelSolveComponentRK4(model, GRANITE, 0, 1, NULL, dr, &rho, &u, &M, 62.366, &R);
 
     fprintf(stderr,"R= %15.7E rho= %15.7E M= %15.7E u= %15.7E\n");
     exit(1);
