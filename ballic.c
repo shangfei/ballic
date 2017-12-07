@@ -7,12 +7,12 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <malloc.h>
+// #include <malloc.h>
 #include <assert.h>
 #include "tipsydefs/tipsy.h"
 
-#define max(A,B) ((A) > (B) ? (A) : (B))
-#define min(A,B) ((A) > (B) ? (B) : (A))
+#define MAX(A,B) ((A) > (B) ? (A) : (B))
+#define MIN(A,B) ((A) > (B) ? (B) : (A))
 
 typedef struct icosa_struct {
     float R[180];
