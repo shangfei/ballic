@@ -6,8 +6,11 @@
  */
 #include <math.h>
 #include <stdio.h>
+#if defined(__APPLE__)
 #include <stdlib.h>
-// #include <malloc.h>
+#else
+#include <malloc.h>
+#endif
 #include <assert.h>
 #include "tipsydefs/tipsy.h"
 
