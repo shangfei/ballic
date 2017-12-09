@@ -17,7 +17,7 @@ BALLIC          = ballic
 
 EXE             = ballic ballic.single ballic.multi modelsolve
 
-CFLAGS          ?= -O3 -march=native
+CFLAGS          ?= -O0 -g -march=native
 FFLAGS          ?= $(CFLAGS)
 
 # NOTE:

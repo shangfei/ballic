@@ -760,6 +760,10 @@ void main(int argc, char **argv) {
 		gp.metals = matLookup(model,0);
 		TipsyAddGas(out,&gp);
 	}
+	printf(stderr, "nShell = %d\n", nShell);
+	char filename[] = "sphIC.txt";
+	FILE* of = fopen(filename, "a");
+	fprintf(of, "nShell = %d\n", nShell);
     for (iShell=0;iShell<nShell;++iShell) {
 	rs = rsShell[iShell];
 	ns = nsShell[iShell];
@@ -784,14 +788,15 @@ void main(int argc, char **argv) {
 		}
 
 	    for (j=0;j<3;++j) gp.pos[j] = rs*r[j];
-	    
 //	    rho = rhoLookup(model,rs);
 	    gp.temp = uLookup(model,rs);
 		// Save Material
 		gp.metals = matLookup(model,rs);
+		fprintf(of, "%e\t%e\t%e\t%e\t%e\t%e\n", gp.pos[0], gp.pos[1], gp.pos[2], rs, gp.temp, gp.metals);
 	    TipsyAddGas(out,&gp);		
 	    }
 	}
+	fclose(of);
     fprintf(stderr,"Writing %d particles. Model R:%g Last Shell r:%g\n",nReached,model->R,rsShell[nShell-1]);
     TipsyWriteAll(out,0.0,"ballic.std");
     TipsyFinish(out);
